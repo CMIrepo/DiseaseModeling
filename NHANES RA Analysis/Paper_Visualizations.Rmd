@@ -1,0 +1,2087 @@
+```{r}
+# ETL & Preprocessing
+#install.packages('rowr')
+#install.packages('magrittr')
+
+library(tidyverse)
+library(foreign)
+library(ggthemes)
+library(scales)
+library(grid)
+library(gridExtra)
+library(magrittr)
+library(rowr)
+
+data = "MC_DEPR_DEM_CRP.csv"
+data = read_csv(data)[,-1]
+
+#cholesterol
+setwd("~/Dropbox/Grayden's Project")
+cv78 = "~/Dropbox/Grayden's Project/Raw Data/07-08/cholesterol.XPT"
+cv910 = "~/Dropbox/Grayden's Project/Raw Data/09-10/cholesterol.XPT"
+cv78 <- read.xport(cv78)
+cv910 <- read.xport(cv910)
+cv <- rbind(cv78, cv910)
+cv$WTSAF2YR <- cv$WTSAF2YR/2
+
+bmi78 <- "~/Dropbox/Grayden's Project/Raw Data/07-08/BMI.XPT"
+bmi910 <- "~/Dropbox/Grayden's Project/Raw Data/09-10/BMI.XPT"
+bmi78 <- read.xport(bmi78)
+bmi910 <- read.xport(bmi910)
+bmi <- rbind(bmi78, bmi910)
+
+dbts78 <- "~/Dropbox/Grayden's Project/Raw Data/07-08/diabetes.XPT"
+dbts910 <- "~/Dropbox/Grayden's Project/Raw Data/09-10/diabetes.XPT"
+dbts78 <- read.xport(dbts78)[c(1,2)]
+dbts910 <- read.xport(dbts910)[c(1,2)]
+dbts <- rbind(dbts78, dbts910)
+
+hpt78 <- "~/Dropbox/Grayden's Project/Raw Data/07-08/blood_pressure.XPT"
+hpt910 <- "~/Dropbox/Grayden's Project/Raw Data/09-10/blood_pressure.XPT"
+hpt78 <- read.xport(hpt78)
+hpt910 <- read.xport(hpt910)
+hpt <- rbind(hpt78, hpt910)
+
+
+data <- data %>% inner_join(cv) %>% inner_join(bmi) %>% inner_join(dbts) %>% inner_join(hpt) %>%
+  select(WTSAF2YR, MCQ190, DPQ010, DPQ020, DPQ030, DPQ040, DPQ050, DPQ060, DPQ070, DPQ080, DPQ090, LBXCRP, LBXTR, BMXBMI, WTMEC2YR, RIAGENDR, RIDAGEYR, INDFMIN2, MCQ160F, DIQ010, BPXSY1, BPXSY2, BPXSY3, BPXSY4, BPXDI1, BPXDI2, BPXDI3, BPXDI4) %>%
+  mutate(depr_severity=DPQ010 + DPQ020 + DPQ030 + DPQ040 + DPQ050 + 
+           DPQ060 + DPQ070 + DPQ080 + DPQ090) %>% 
+  mutate(depr_severity_class = ifelse(depr_severity < 5, NA, ifelse(depr_severity >= 
+          5 & depr_severity < 10, "Mild", ifelse(depr_severity >= 10 & depr_severity <
+          15, 'Moderate', ifelse(depr_severity >=15 & depr_severity < 
+          20, 'Moderately Severe', 'Severe'))))) %>%
+  filter(RIDAGEYR < 80) %>%
+  filter(MCQ190 %in% c('Rheumatoid', NA)) %>%
+  select(-11:-3)%>%
+  filter(MCQ190 %in% c('Rheumatoid', NA))
+data$MCQ190 <- factor(data$MCQ190)
+data$MCQ190 <- addNA(data$MCQ190)
+levels(data$MCQ190)[2] <- 'No Arthritis'
+data$INDFMIN2[data$INDFMIN2 %in% c(12, 13, 77, 99)] <- NA
+levels(data$MCQ190)[2] <- 'No Arthritis'
+
+mcv <- ggplot(data, aes(MCQ190, LBXCRP*10))
+mcv + geom_violin(aes(fill = MCQ190))+ theme_bw() + 
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_text(margin = margin(t=0,r=11,b=0,l=0)),
+        axis.title = element_text(size=17),
+        axis.text = element_text(size=15),
+        axis.line = element_line(color ="black"),
+        legend.position = "none") + ylim(c(0,30))
+
+
+dpv <- ggplot(data, aes(MCQ190, depr_severity))
+dpv + geom_violin(aes(fill = MCQ190))+ theme_bw() + 
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_text(margin = margin(t=0,r=11,b=0,l=0)),
+        axis.title = element_text(size=17),
+        axis.text = element_text(size=15),
+        axis.line = element_line(color ="black"),
+        legend.position = "none") 
+
+triv <- ggplot(data, aes(MCQ190, LBXTR))
+triv + geom_violin(aes(fill = MCQ190)) + theme_bw() + 
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_text(margin = margin(t=0,r=11,b=0,l=0)),
+        axis.title = element_text(size=17),
+        axis.text = element_text(size=15),
+        axis.line = element_line(color ="black"),
+        legend.position = "none") + ylim(c(0,750))
+
+bmiv <- ggplot(data, aes(MCQ190, BMXBMI))
+bmiv + geom_violin(aes(fill = MCQ190))+ theme_bw() + 
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_text(margin = margin(t=0,r=11,b=0,l=0)),
+        axis.title = element_text(size=17),
+        axis.text = element_text(size=15),
+        axis.line = element_line(color ="black"),
+        legend.position = "none") 
+
+# Cumulative distributions
+#This section produces the Figure of the cumulative distribution plots comparing Triglyceride, CRP, Depression and BMI in the RA population vs the No-RA population. The figure uses the NHANES sample weights. 
+
+#Rheumatoid vs. RA
+mcq <- data %>% select(WTSAF2YR, MCQ190, LBXCRP) %>%
+  filter(MCQ190 %in% c('Rheumatoid', NA))
+mcq$MCQ190 <- factor(mcq$MCQ190)
+mcq$MCQ190 <- addNA(mcq$MCQ190)
+levels(mcq$MCQ190)[2] <- 'No Arthritis'
+mcq <- mcq %>% arrange(MCQ190, LBXCRP) %>%
+  group_by(MCQ190) %>%
+  mutate(wt = cumsum(WTSAF2YR/sum(WTSAF2YR)))
+
+mcv <- ggplot(mcq, aes(MCQ190, LBXCRP*10))
+mcv + geom_violin(aes(fill = MCQ190))
+
+
+mca <- mcq %>% ggplot(aes(x=LBXCRP*10,y=wt, color=fct_rev(MCQ190))) + 
+  geom_line(na.rm=TRUE, size=1.5) + 
+  labs(x = "", y = "Frequency (%)",title="RA") + 
+  theme_classic() + 
+  theme(legend.position = c(.6,.4),
+        legend.text=element_text(size=15),
+        legend.key.width=unit(1, "cm"),
+        legend.background=element_rect(fill="#ffffff",
+        color="#eeeeee"),
+        axis.title = element_text(size=17),
+        axis.text=element_text(color="black",size=15),
+        panel.grid.major.y=element_line(color="#eeeeee"),
+        plot.title=element_text(size=17, hjust=0),
+        axis.ticks=element_line(size=2),
+        axis.line = element_line(size=rel(2.5)),
+        legend.title=element_blank()) +
+  xlim(c(0,31)) +
+  #xlab('') +
+  #ylab("RA %") +
+  scale_fill_hue()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+mca
+#scale_color_manual(values=c("#56B4E9", "#CC79A7")
+#Depression Severity
+dpq <- data %>% select(WTSAF2YR, depr_severity, LBXCRP) %>%
+  drop_na(depr_severity) %>%
+  mutate(depr_binary = ifelse(depr_severity < 10, 0, 1)) %>%
+  mutate_at(vars(matches('depr_binary')), factor, levels=c(0,1), labels=c('PHQ9 < 10', 'PHQ9 >= 10')) %>%
+  group_by(depr_binary) %>%
+  arrange(LBXCRP) %>%
+  mutate(wt = cumsum(WTSAF2YR/sum(WTSAF2YR)))
+
+dpq_data <- Map(cbind.fill, mcq, dpq, MoreArgs= list(fill=NA))
+dp_data <- Map(cbind.fill, dpq, mcq, MoreArgs= list(fill=NA))
+
+depr_severity <- dp_data$depr_severity
+names(depr_severity) <- c("severity", "RA")
+dpv <- ggplot(depr_severity, aes(RA, severity))
+dpv + geom_violin(aes(fill = RA))
+
+dpq <- dpq %>% ggplot(aes(x=LBXCRP*10,y=wt, color=depr_binary)) + 
+  geom_line(na.rm=TRUE, size=1.5) + 
+  labs(x='', y='Frequency (%)', title="Depression") + 
+  theme_classic() + 
+  theme(legend.position = c(.6,.4),
+        legend.text=element_text(size=15),
+        legend.key.width=unit(1, "cm"),
+        legend.background=element_rect(fill="#ffffff",
+        color="#eeeeee"),
+        axis.title = element_text(size=17),
+        axis.text=element_text(color="black",size=15),
+        panel.grid.major.y=element_line(color="#eeeeee"), 
+        plot.title=element_text(size=17, hjust=0),
+        axis.ticks=element_line(size=2),
+        axis.line = element_line(size=rel(2.5)),
+        legend.title=element_blank()) +
+  xlim(c(0,31)) + 
+  scale_y_continuous() + 
+  scale_fill_hue() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+dpq
+
+#Triglyceride Levels
+tri <- data %>% select(WTSAF2YR, LBXCRP, LBXTR) %>%
+  drop_na() %>%
+  mutate(tri_binary = ifelse(LBXTR < 150, 0, 1)) %>%
+  mutate_at(vars(matches('tri_binary')), factor, levels=c(0,1), labels=c('Triglyceride < 150 mg/L', 'Triglyceride >= 150 mg/L')) %>%
+  group_by(tri_binary) %>%
+  arrange(LBXCRP) %>%
+  mutate(wt = cumsum(WTSAF2YR/sum(WTSAF2YR)))
+
+tri_data <- Map(cbind.fill, mcq, tri, MoreArgs= list(fill=NA))
+tr_data <- Map(cbind.fill, tri, mcq, MoreArgs= list(fill=NA))
+
+tri_two <- tri_data$MCQ190
+names(tri_two) <- c("RA", "LBXCRP")
+triv <- ggplot(tri_two, aes(RA, LBXCRP*10))
+triv + geom_violin(aes(fill = RA))
+
+tri_two2 <- as.data.frame(cbind(tri_data$MCQ190[,1],tri_data$LBXCRP[,2]))
+names(tri_two2) <- c("RA","LBXTR")
+triv2 <- ggplot(tri_two2, aes(as.factor(RA), LBXTR))
+triv2 + geom_violin(aes(fill = RA))
+
+triPlot <- tri %>% ggplot(aes(x=LBXCRP*10,y=wt, color=tri_binary)) + 
+  geom_line(na.rm=TRUE, size=1.5) + 
+  labs(x='', y='Frequency (%)', title="Hypertriglyceridemia") + 
+  theme_classic() + 
+  theme(legend.position = c(.6,.4),
+        legend.text=element_text(size=15),
+        legend.key.width=unit(1, "cm"),
+        legend.background=element_rect(fill="#ffffff",
+        color="#eeeeee"),
+        axis.title = element_text(size=17),
+        axis.text=element_text(color="black",size=15),
+        panel.grid.major.y=element_line(color="#eeeeee"), 
+        plot.title=element_text(size=17, hjust=0),
+        axis.ticks=element_line(size=2),
+        axis.line = element_line(size=rel(2.5)),
+        legend.title=element_blank()) +
+  xlim(c(0,31)) + 
+  scale_y_continuous() + 
+  scale_fill_hue() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+triPlot 
+
+# BMI
+bmi <- data %>% select(WTSAF2YR, BMXBMI, LBXCRP) %>%
+  drop_na(LBXCRP, BMXBMI) %>%
+  mutate(bmi_binary = ifelse(BMXBMI < 30, 0, 1)) %>%
+  mutate_at(vars(matches('bmi_binary')), factor, levels=c(0,1), labels=c('BMI < 30', 'BMI >= 30')) %>%
+  group_by(bmi_binary) %>%
+  arrange(LBXCRP) %>%
+  mutate(wt = cumsum(WTSAF2YR/sum(WTSAF2YR)))
+
+bmi_data <- Map(cbind.fill, mcq, bmi, MoreArgs= list(fill=NA))
+tr_data <- Map(cbind.fill, tri, mcq, MoreArgs= list(fill=NA)) # GRAYDEN OVERWROTE TRI TO BE A PLOT AND IS TRYING TO USE IT AS A DATAFRAME HERE
+
+bmi_two <- bmi_data$MCQ190
+names(bmi_two) <- c("RA", "BMI")
+bmiv <- ggplot(bmi_two, aes(RA, BMI))
+bmiv + geom_violin(aes(fill = RA))
+
+bmi <- bmi %>% ggplot(aes(x=LBXCRP*10,y=wt, color=bmi_binary)) + 
+  geom_line(na.rm=TRUE, size=1.5) + 
+  labs(x='', y='Frequency (%)', title="Obese") + 
+  theme_classic() + 
+  theme(legend.position = c(.6,.4),
+        legend.text=element_text(size=15),
+        legend.key.width=unit(1, "cm"),
+        legend.background=element_rect(fill="#ffffff",
+        color="#eeeeee"),
+        axis.title = element_text(size=17),
+        axis.text=element_text(color="black",size=15),
+        panel.grid.major.y=element_line(color="#eeeeee"), 
+        plot.title=element_text(size=17, hjust=0),
+        axis.ticks=element_line(size=2),
+        axis.line = element_line(size=rel(2.5)),
+        legend.title=element_blank()) +
+  xlim(c(0,31)) + 
+  scale_y_continuous() + 
+  scale_fill_hue() + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+bmi 
+
+fig3 <- grid.arrange(mca, dpq, triPlot, bmi, nrow=2, bottom=textGrob('CRP (mg/L)', gp=gpar(fontsize=16,font=2))) # mca WAS MISSTYPED AS mcq
+
+ggsave("figure_3.png", fig3, width=unit(12, "in"), height=unit(8, "in")) # I HAD TO RESCALE THIS BY A FACTOR OF TWO ALONG EACH DIMENSION SO THAT THE PLOT WAS NOT SQUISHED
+```
+
+```{r}
+sum(data$crp_mgl[!is.na(data$crp_mgl)] == 10)
+```
+
+```{r include=FALSE}
+#Unused section with some modeling on the various variables
+
+data %<>% 
+  mutate(crp_mgl = LBXCRP * 10) %>% 
+  mutate(low_crp = crp_mgl <= 1, med_crp = crp_mgl> 1 & crp_mgl <=
+           3, high_crp = crp_mgl > 3 & crp_mgl <= 10, vhigh_crp = crp_mgl >= 10) %>% 
+  mutate(gender = ifelse(RIAGENDR ==1, 0, 1)) %>%
+  select(-RIAGENDR) %>% 
+  mutate(bmi_25 = BMXBMI > 25) %>%
+  mutate(male_bmi_25 = BMXBMI > 25 & gender==0) %>%
+  mutate(female_bmi_25 = BMXBMI > 25 & gender==1) %>%
+  mutate(male_depressed = gender==0 & depr_severity>=15) %>%
+  mutate(female_depressed = gender==1 & depr_severity>=15)
+
+#Age
+summary(lm(data$RIDAGEYR ~ data$low_crp + data$med_crp + data$high_crp + data$vhigh_crp))
+
+#Gender
+summary(glm(data$gender ~ data$low_crp + data$med_crp + data$high_crp + data$vhigh_crp, family=binomial(link="logit")))
+
+#BMI > 25
+summary(glm(data$bmi_25 ~ data$low_crp + data$med_crp + data$high_crp + data$vhigh_crp, family=binomial(link="logit")))
+
+#Male & BMI > 25
+summary(glm(data$male_bmi_25 ~ data$low_crp + data$med_crp + data$high_crp + data$vhigh_crp, family=binomial(link="logit")))
+
+#Female & BMI > 25
+summary(glm(data$female_bmi_25 ~ data$low_crp + data$med_crp + data$high_crp + data$vhigh_crp, family=binomial(link="logit")))
+
+#Male & Depressed (>=15)
+summary(glm(data$male_depressed ~ data$low_crp + data$med_crp + data$high_crp + data$vhigh_crp, family=binomial(link="logit")))
+
+#Female & Depressed (>=15)
+summary(glm(data$female_depressed ~ data$low_crp + data$med_crp + data$high_crp + data$vhigh_crp, family=binomial(link="logit")))
+```
+
+# Summary Table
+This section contains code chunks that supply the information for the summary demographics table comparing the RA and No-RA populations. Sample weights were used for the analysis.
+
+## AGE
+```{r}
+tbl <- data %>%
+  mutate(age_low = RIDAGEYR <= 40, age_med = RIDAGEYR > 40 & RIDAGEYR <=60, age_high = RIDAGEYR >60) %>%
+  group_by(MCQ190) %>%
+  summarise(age_low = sum(age_low), age_med = sum(age_med), age_high = sum(age_high), n=n(), mean=mean(RIDAGEYR), sd(RIDAGEYR))
+
+tbl <- data %>%
+  mutate(age_low = RIDAGEYR <= 40, age_med = RIDAGEYR > 40 & RIDAGEYR <=60, age_high = RIDAGEYR >60) %>%
+  group_by(MCQ190) %>%
+  summarise(age_low = sum(WTSAF2YR[age_low==1]), age_med = sum(WTSAF2YR[age_med==1]), age_high = sum(WTSAF2YR[age_high==1]), n=sum(WTSAF2YR), mean=sum(RIDAGEYR*WTSAF2YR)/sum(WTSAF2YR), sd=sqrt(sum(((RIDAGEYR-sum(RIDAGEYR*WTSAF2YR)/sum(WTSAF2YR))^2)*WTSAF2YR)/(sum(WTSAF2YR)-1))) %>%
+  mutate(pct_low=round(age_low/n*100,1), pct_med = round(age_med/n*100,1), pct_high=round(age_high/n*100,1))
+
+
+tbl
+m = as.matrix(tbl[,c(2:4)])
+rownames(m) = c('RA', 'NA')
+m
+chisq.test(m)
+sum(m)
+
+t.test(data$RIDAGEYR[data$MCQ190 %in% c('Rheumatoid')], data$RIDAGEYR[data$MCQ190 %in% c(NA)])
+
+
+
+t.observed = (tbl$mean[1]-tbl$mean[2])/sqrt(tbl$sd[1]^2/tbl$n[1] + tbl$sd[2]^2/tbl$n[2])
+deg.f <- (tbl$sd[1]^2/tbl$n[1] + tbl$sd[2]^2/tbl$n[2])^2/((tbl$sd[1]^4/tbl$n[1]^2)/(tbl$n[1]-1) + (tbl$sd[2]^4/tbl$n[2]^2)/(tbl$n[2]-1))
+
+
+
+pt(t.observed, deg.f, lower.tail=FALSE)
+```
+
+## GENDER
+```{r}
+data %>%
+  group_by(MCQ190, gender) %>%
+  summarise(n=sum(WTSAF2YR)) %>%
+  mutate(p = round(n/sum(n)*100, 1))
+  
+
+
+m <- matrix(c(3371900, 5008613, 79796903, 75362826), nrow=2, ncol=2, byrow=TRUE)
+rownames(m) <- c("RA", NA)
+colnames(m) <- c("Male", "Female")
+
+m
+
+chisq.test(m)
+```
+
+## INCOME
+```{r}
+data %>%
+  mutate(low_income = INDFMIN2 < 6, med_income = INDFMIN2 > 5 & INDFMIN2 < 14, high_income = INDFMIN2 > 13, na = INDFMIN2 %in% c(NA)) %>%
+  group_by(MCQ190) %>%
+  summarise(low_income = sum(low_income, na.rm=TRUE)/n(), med_income = sum(med_income, na.rm=TRUE)/n(), high_income = sum(high_income, na.rm=TRUE)/n(), na=sum(na)/n())
+
+m = matrix(c(130,109,41,25,1180,1471,819,361), nrow=2, ncol=4, byrow=TRUE)
+rownames(m) <- c('RA', NA)
+colnames(m) <- c('low', 'med', 'high', 'na')
+sum(m[1,])
+chisq.test(m)
+
+
+
+#Weighted
+data %>%
+  mutate(low_income = INDFMIN2 < 6, med_income = INDFMIN2 > 5 & INDFMIN2 < 14, high_income = INDFMIN2 > 13, na = INDFMIN2 %in% c(NA)) %>%
+  group_by(MCQ190) %>%
+  summarise(low_income = sum(WTSAF2YR[low_income==1], na.rm=TRUE)/sum(WTSAF2YR), med_income = sum(WTSAF2YR[med_income==1], na.rm=TRUE)/sum(WTSAF2YR), high_income = sum(WTSAF2YR[high_income==1], na.rm=TRUE)/sum(WTSAF2YR), na=sum(WTSAF2YR[na==1])/sum(WTSAF2YR))
+
+m = matrix(c(3126096,3187188,1474647,592582,35684140,60118646,50108916,9248027), nrow=2, ncol=4, byrow=TRUE)
+rownames(m) <- c('RA', NA)
+colnames(m) <- c('low', 'med', 'high', 'na')
+sum(m)
+chisq.test(m)
+```
+
+## DEPRESSION
+```{r}
+data %>%
+  mutate(mod_sev_depr = depr_severity >= 10) %>%
+  group_by(MCQ190) %>%
+  summarise(p = sum(WTSAF2YR[mod_sev_depr==1], na.rm=TRUE), sum(WTSAF2YR))
+
+
+prop.test(x=c(1576573,8299320), n=c(8380512,155159729))
+```
+
+## TRIGLYCERIDE
+```{r}
+data %>%
+  mutate(high_tri = LBXTR > 200) %>%
+  group_by(MCQ190) %>%
+  summarise(count=sum(WTSAF2YR[high_tri==1], na.rm=TRUE), sum(WTSAF2YR))
+
+prop.test(x=c(1610680,18444010), n=c(8380512,155159729))
+```
+
+## STROKE
+```{r}
+data %>% mutate(stroke = MCQ160F == 1) %>%
+  group_by(MCQ190) %>%
+  summarise(count=sum(WTSAF2YR[stroke==1], na.rm=TRUE), sum(WTSAF2YR))
+
+prop.test(x=c(691128.8,1679696.2), n=c(8380512,155159729))
+```
+
+## DIABETES
+```{r}
+data %>% mutate(diabetes = DIQ010 == 1) %>%
+  group_by(MCQ190) %>%
+  summarise(count=sum(WTSAF2YR[diabetes==1], na.rm=TRUE), sum(WTSAF2YR))
+
+prop.test(x=c(2003661,8787123), n=c(8380512,155159729))
+
+```
+
+## HYPERTENSION
+```{r}
+
+data %>%
+  mutate(systolic = rowMeans(data[,c(12:15)], na.rm=TRUE), diastolic = rowMeans(data[,c(16:19)], na.rm=TRUE)) %>%
+  mutate(hypertension_systolic = systolic > 130, hypertension_diastolic = diastolic > 80) %>%
+  group_by(MCQ190) %>%
+  summarise(sys = sum(WTSAF2YR[hypertension_systolic==1], na.rm=TRUE), dia = sum(WTSAF2YR[hypertension_diastolic==1], na.rm=TRUE), sum(WTSAF2YR))
+
+
+prop.test(x=c(2936593,22579296), n=c(8380512,155159729))
+prop.test(x=c(1438295,21935832), n=c(8380512,155159729))
+```
+
+## OBESITY
+```{r}
+tmp <- data %>% mutate(obese = BMXBMI >= 30) %>%
+  group_by(MCQ190) %>% summarise(obese = sum(obese, na.rm=TRUE), n=n()) %>% mutate(p=obese/n)
+
+tmp <- data %>% mutate(obese = BMXBMI >= 30) %>%
+  group_by(MCQ190) %>% summarise(obese = sum(WTSAF2YR[obese==TRUE], na.rm=TRUE), n=sum(WTSAF2YR, na.rm=TRUE)) %>% mutate(p=obese/n)
+
+tmp
+prop.test(tmp$obese, tmp$n)
+
+```
+
+# CRP Correlation
+## Unweighted
+```{r}
+df <- data %>%
+  select(LBXCRP, BMXBMI, depr_severity, LBXTR)
+
+cor.test(df$LBXCRP, df$BMXBMI)
+cor.test(df$LBXCRP, df$depr_severity)
+cor.test(df$LBXCRP, df$LBXTR)
+
+cor.test(df$LBXCRP, df$BMXBMI, method="spearman")
+cor.test(df$LBXCRP, df$depr_severity, method="spearman")
+cor.test(df$LBXCRP, df$LBXTR, method="spearman")
+```
+
+
+## Weighted
+```{r}
+df <- data %>%
+  select(WTSAF2YR, LBXCRP, BMXBMI, depr_severity, LBXTR) %>% drop_na()
+
+#df$WTSAF2YR <- 1
+
+weighted.cor.p <- function(x, y, w) {
+  n <- sum(w)
+  num <- n*sum(x*y*w, na.rm=TRUE)-
+    sum(x*w, na.rm=TRUE)*
+    sum(y*w, na.rm=TRUE)
+  denom <- sqrt(((n*sum(x^2*w, na.rm=TRUE))-
+                   sum(x*w, na.rm=TRUE)^2)*
+                  ((n*sum(y^2*w, na.rm=TRUE))-
+                     sum(y*w, na.rm=TRUE)^2))
+  r <- num/denom
+  t <- r*sqrt(n-2)/sqrt(1-r^2)
+  p <- pt(t, n-1, lower.tail=FALSE)
+  return(paste(round(r,2), p))
+}
+
+weighted.cor.p(df$LBXCRP, df$BMXBMI, df$WTSAF2YR)
+weighted.cor.p(df$LBXCRP, df$depr_severity, df$WTSAF2YR)
+weighted.cor.p(df$LBXCRP, df$LBXTR, df$WTSAF2YR)
+
+#cor(df$LBXCRP, df$BMXBMI, use="complete.obs")
+#cor(df$LBXCRP, df$depr_severity, use="complete.obs")
+#cor(df$LBXCRP, df$LBXTR, use="complete.obs")
+```
+
+
+
+
+# CRP Vis
+```{r}
+# Code chunk: For Daniel on 2/8/2020
+nrow(df)
+sum(df$crp_class == "Low")
+sum(df$crp_class == "Med")
+sum(df$crp_class == "High")
+write.csv(df, file = "~/Dropbox/Grayden's Project/Cleaned Data/grayden_data.csv")
+```
+
+
+```{r}
+#RA INCIDENCE
+data %>% mutate(crp = LBXCRP * 10) %>%
+  mutate(low_crp = crp <= 1, med_crp = crp >1 & crp <=3, high_crp = crp>3) %>% 
+  group_by(MCQ190) %>%
+  summarise(low=sum(WTSAF2YR[low_crp==1], na.rm=TRUE), med=sum(WTSAF2YR[med_crp==1], na.rm=TRUE), high=sum(WTSAF2YR[high_crp==1], na.rm=TRUE), n=sum(WTSAF2YR))
+
+m =matrix(c(1819167, 2231010, 4330335, 62825879, 46122377, 45841984), nrow=2, ncol=3, byrow=TRUE)
+rownames(m) <- c("RA", NA)
+colnames(m) <- c("Low", "Med", "High")
+total <- m[1,] + m[2,]
+p <- m[1,]/total
+m <- rbind(m, total)
+m <- rbind(m, p)
+round(m, 3)
+
+df <- as.data.frame(m[4,]) %>% mutate(level=colnames(m))
+
+names(df)[1] <- "RA_Rate"
+df$level = ordered(df$level, levels=c("Low", "Med", "High"), labels=c("<1", "1-3", ">3"))
+df
+#light shape of grey for colors, same color
+#make y ticks percentage, no sign
+#bigger borders, smaller x axis label
+#no legend
+#add ticks to the borders, outward
+#for the line plot, make the lines bigger
+#line get rid of y axis percent
+#line use fewer x axis labels, 5 or 6
+#line change legend to 
+#for line, use either color or shape not both
+#line thickness of plots to match axis lines, dots to lines, scale per mg per liter
+#For bar export as a square dimension
+cbPalette <- c("#999999", "#999999", "#999999")
+ra_inc <- df %>% ggplot(aes(x=level, y=RA_Rate, fill=level)) + 
+  geom_bar(stat="identity") +
+  scale_fill_manual(values=cbPalette) +
+  #scale_y_continuous(labels=percent) + 
+  theme_classic() + 
+  labs(y="RA (%)", x='CRP (mg/L)') + 
+  theme(axis.ticks=element_line(size=2), 
+        axis.text=element_text(face="bold", size=15, color="#000000"), 
+        axis.title=element_text(size=17),
+        #plot.title=element_text(size=rel(1.5), hjust=-.15, face="bold"),
+        axis.line = element_line(size=rel(3)), 
+        legend.position = "none")
+ra_inc
+
+#BMI
+df <- data %>% mutate(crp = LBXCRP * 10) %>%
+  mutate(crp_class = ifelse(crp <= 1, "Low", ifelse(crp <= 3, "Med", "High"))) %>%
+  select(WTSAF2YR, BMXBMI, crp_class) %>% drop_na()
+df$crp_class <- ordered(df$crp_class, levels=c("Low", "Med", "High"), labels=c("<1", "1-3", ">3"))
+
+
+df %<>% mutate(crp_class_p = ifelse(crp_class=="<1", WTSAF2YR/sum(WTSAF2YR[df$crp_class=="<1"], na.rm=TRUE), ifelse(crp_class=="1-3", WTSAF2YR/sum(WTSAF2YR[df$crp_class=="1-3"],na.rm=TRUE), WTSAF2YR/sum(WTSAF2YR[df$crp_class==">3"], na.rm=TRUE))))
+  
+df$BMXBMI <- cut(df$BMXBMI, 21, ordered_result=TRUE, labels=seq(14, 94, 4))
+
+crp_class <- c(rep("<1", times=21),rep("1-3",times=21), rep(">3", times=21))
+crp_class <- data.frame(crp_class) %>% mutate(BMI=rep(seq(14,94,4),times=3)) %>% unite(id, sep="_")
+df %<>% unite(id, crp_class, BMXBMI, sep="_")
+df <- left_join(crp_class, df)
+df %<>% separate(id, c('crp_class', 'BMXBMI'), sep="_")
+
+df %<>% group_by(crp_class, BMXBMI) %>% summarise(crp_class_p = sum(crp_class_p)) %>% ungroup() %>% group_by(crp_class)
+
+df$crp_class_p[is.na(df['crp_class_p'])] <- 0
+
+df$crp_class = ordered(df$crp_class, levels=c('<1', '1-3', '>3'))
+#shape=crp_class,linetype=crp_class,
+#quantile(rnorm(100), probs = seq(0, 1, .1))
+bmi_crp <- df %>% filter(BMXBMI < 66) %>%
+  ggplot(aes(x=as.numeric(BMXBMI), y=crp_class_p, group=crp_class, colour=crp_class)) + 
+  geom_line(size=rel(1.5)) +
+  geom_point(size=3) +
+  scale_colour_hue() +
+  #geom_point() + 
+  theme_classic() + 
+  theme(axis.ticks=element_line(size=2),
+        #axis.ticks.x.bottom =  element_line(),
+        axis.line = element_line(size=rel(3)),
+        axis.title=element_text(size=17, face="bold"),
+        axis.text=element_text(face="bold", size=15, color="#000000"), 
+        plot.title = element_text(size=rel(1.5), hjust=-.15, face="bold"),
+        legend.position=c(.75,.6),
+        legend.title = element_text(size = 15, face="bold"),
+        legend.text = element_text(size = 13)) +
+  scale_x_continuous(breaks = c(10,20,30,40,50,60,70))+
+  xlab("BMI") + ylab("CRP (mg/L)") +
+  guides(linetype=guide_legend(title="CRP mg/L"), 
+                                            shape=guide_legend(title="CRP mg/L"))
+  #scale_x_discrete(breaks = seq(10,70, by = 10))
+  #scale_y_continuous(labels=percent) + labs(x="BMI", y="% of sample")
+  #guides(linetype=guide_legend(title="CRP mg/L"), 
+         #shape=guide_legend(title="CRP mg/L")) 
+bmi_crp
+#TRIGLYCERIDE
+df <- data %>% mutate(crp = LBXCRP * 10) %>%
+  filter(LBXTR < 1000) %>%
+  mutate(crp_class = ifelse(crp <= 1, "Low", ifelse(crp <= 3, "Med", "High"))) %>%
+  select(WTSAF2YR, LBXTR, crp_class) %>% drop_na()
+df$crp_class <- ordered(df$crp_class, levels=c("Low", "Med", "High"))
+
+df %<>% mutate(crp_class_p = ifelse(crp_class=="Low", WTSAF2YR/sum(WTSAF2YR[df$crp_class=="Low"], na.rm=TRUE), ifelse(crp_class=="Med", WTSAF2YR/sum(WTSAF2YR[df$crp_class=="Med"],na.rm=TRUE), WTSAF2YR/sum(WTSAF2YR[df$crp_class=="High"], na.rm=TRUE))))
+
+df$LBXTR <- cut(df$LBXTR, 31, ordered_result=TRUE, labels=seq(10,1000,length.out=31))
+
+df %<>% group_by(crp_class, LBXTR) %>% summarise(crp_class_p = sum(crp_class_p)) %>% ungroup() %>% group_by(crp_class)
+
+crp_class <- c(rep("Low", times=31),rep("Med",times=31), rep("High", times=31))
+crp_class <- data.frame(crp_class) %>% mutate(LBXTR=ordered(rep(seq(10,1000,length.out=31),times=3))) %>% unite(id, sep="_")
+df %<>% unite(id, crp_class, LBXTR, sep="_")
+df <- left_join(crp_class, df)
+df %<>% separate(id, c('crp_class', 'LBXTR'), sep="_")
+df$LBXTR <- ordered(as.numeric(df$LBXTR))
+
+
+df$crp_class_p[is.na(df['crp_class_p'])] <- 0
+
+df$crp_class = factor(df$crp_class, levels=c("Low", "Med", "High"), labels=c("<1", "1-3", ">3"))
+
+tri_crp <- df %>% filter(LBXTR < 406) %>%
+  ggplot(aes(x=as.numeric(LBXTR), y=crp_class_p, group=crp_class, colour=crp_class)) + 
+  geom_line(size=rel(1.5)) + 
+  geom_point(size=3) + 
+  scale_colour_hue() +
+  theme_classic() + 
+  theme(axis.ticks=element_line(size=2),
+        axis.line = element_line(size=rel(3)),
+        #axis.title.y=element_blank(),
+        axis.title=element_text(size=17, face="bold"), 
+        axis.text.x=element_text(face="bold", size=15, color="#000000"), 
+        axis.text.y = element_text(face="bold", size=15, color="#000000"),
+        plot.title = element_text(size=rel(1.5), hjust=-.15, face="bold"),
+        legend.position=c(.75,.6),
+        legend.title = element_text(size = 15, face="bold"),
+        legend.text = element_text(size = 13),
+        legend.background=element_rect(color='#000000')) +
+  #scale_y_continuous(labels=percent) + 
+  labs(x="Triglyceride mg/L", y="% of sample") +
+  #scale_x_discrete(breaks = c(10,75,150,225,300,375)) +
+  guides(linetype=guide_legend(title="CRP mg/L"), 
+         shape=guide_legend(title="CRP mg/L"))
+tri_crp #x axis scaled down by 30
+
+#DEPRESSION
+df <- data %>% mutate(crp = LBXCRP * 10) %>%
+  mutate(crp_class = ifelse(crp <= 1, "Low", ifelse(crp <= 3, "Med", "High"))) %>%
+  select(WTSAF2YR, depr_severity, crp_class) %>% drop_na()
+df$crp_class <- ordered(df$crp_class, levels=c("Low", "Med", "High"))
+
+df %<>% mutate(crp_class_p = ifelse(crp_class=="Low", WTSAF2YR/sum(WTSAF2YR[df$crp_class=="Low"], na.rm=TRUE), ifelse(crp_class=="Med", WTSAF2YR/sum(WTSAF2YR[df$crp_class=="Med"],na.rm=TRUE), WTSAF2YR/sum(WTSAF2YR[df$crp_class=="High"], na.rm=TRUE))))
+
+df$depr_severity <- cut(df$depr_severity, 28, ordered_result=TRUE, labels=seq(0,27,length.out=28))
+
+crp_class <- c(rep("Low", times=28),rep("Med",times=28), rep("High", times=28))
+crp_class <- data.frame(crp_class) %>% mutate(depr_severity=ordered(rep(seq(0,27,length.out=28),times=3))) %>% unite(id, sep="_")
+df %<>% unite(id, crp_class, depr_severity, sep="_")
+df <- left_join(crp_class, df)
+df %<>% separate(id, c('crp_class', 'depr_severity'), sep="_")
+df$depr_severity <- ordered(as.numeric(df$depr_severity))
+
+
+
+df %<>% group_by(crp_class, depr_severity) %>% summarise(crp_class_p = sum(crp_class_p)) %>% ungroup() %>% group_by(crp_class)
+
+df$crp_class_p[is.na(df['crp_class_p'])] <- 0
+
+df$crp_class = factor(df$crp_class, levels=c("Low", "Med", "High"), labels=c("<1", "1-3", ">3"))
+
+depr_crp <- df %>% filter(depr_severity >= 5) %>% 
+  ggplot(aes(x=depr_severity, y=crp_class_p, group=crp_class, colour=crp_class)) + 
+  geom_line(size=rel(1.5)) + 
+  geom_point(size=3) + 
+  scale_colour_hue() +
+  theme_classic() + 
+  theme(axis.ticks=element_line(size=2),
+        axis.line=element_line(size=rel(3)), 
+        axis.title=element_text(size=17, face="bold"), 
+        axis.text=element_text(face="bold", size=15, color="#000000"), 
+        plot.title = element_text(size=rel(1.5), hjust=-.15, face="bold"),
+        legend.position=c(.75,.6),
+        legend.title = element_text(size = 15, face="bold"),
+        legend.text = element_text(size = 13)) + 
+  xlab("Depression (PHQ-9)")+ ylab("% of sample") + 
+  guides(linetype=guide_legend(title="CRP mg/L"), 
+         shape=guide_legend(title="CRP mg/L")) + 
+  scale_x_discrete(breaks=seq(0,31,5))
+depr_crp
+
+fig4 <- grid.arrange(ra_inc, depr_crp, tri_crp, bmi_crp, nrow=2)
+
+ggsave("figure_4.png", fig4, width=unit(12, "in"), height=unit(8, "in"))
+```
+
+
+```{r}
+df <- data %>%
+  select(WTSAF2YR, LBXCRP, BMXBMI, depr_severity, LBXTR) %>% drop_na()
+
+#df$WTSAF2YR <- 1
+
+weighted.cor.p <- function(x, y, w) {
+  n <- sum(w)
+  num <- n*sum(x*y*w, na.rm=TRUE)-
+    sum(x*w, na.rm=TRUE)*
+    sum(y*w, na.rm=TRUE)
+  denom <- sqrt(((n*sum(x^2*w, na.rm=TRUE))-
+                   sum(x*w, na.rm=TRUE)^2)*
+                  ((n*sum(y^2*w, na.rm=TRUE))-
+                     sum(y*w, na.rm=TRUE)^2))
+  r <- num/denom
+  t <- r*sqrt(n-2)/sqrt(1-r^2)
+  p <- pt(t, n-1, lower.tail=FALSE)
+  return(paste(round(r,2), p))
+}
+
+weighted.cor.p(df$LBXCRP, df$BMXBMI, df$WTSAF2YR)
+weighted.cor.p(df$LBXCRP, df$depr_severity, df$WTSAF2YR)
+weighted.cor.p(df$LBXCRP, df$LBXTR, df$WTSAF2YR)
+
+#cor(df$LBXCRP, df$BMXBMI, use="complete.obs")
+#cor(df$LBXCRP, df$depr_severity, use="complete.obs")
+#cor(df$LBXCRP, df$LBXTR, use="complete.obs")
+```
+
+
+
+
+# CRP Vis
+
+```{r}
+#RA INCIDENCE
+data %>% mutate(crp = LBXCRP * 10) %>%
+  mutate(low_crp = crp <= 1, med_crp = crp >1 & crp <=3, high_crp = crp>3) %>% 
+  group_by(MCQ190) %>%
+  summarise(low=sum(WTSAF2YR[low_crp==1], na.rm=TRUE), med=sum(WTSAF2YR[med_crp==1], na.rm=TRUE), high=sum(WTSAF2YR[high_crp==1], na.rm=TRUE), n=sum(WTSAF2YR))
+
+m =matrix(c(1819167, 2231010, 4330335, 62825879, 46122377, 45841984), nrow=2, ncol=3, byrow=TRUE)
+rownames(m) <- c("RA", NA)
+colnames(m) <- c("Low", "Med", "High")
+total <- m[1,] + m[2,]
+p <- m[1,]/total
+m <- rbind(m, total)
+m <- rbind(m, p)
+round(m, 3)
+
+df <- as.data.frame(m[4,]) %>% mutate(level=colnames(m))
+
+names(df)[1] <- "RA_Rate"
+df$level = ordered(df$level, levels=c("Low", "Med", "High"), labels=c("<1", "1-3", ">3"))
+df
+
+ra_inc <- df %>% ggplot(aes(x=level, y=RA_Rate)) + 
+  geom_bar(stat="identity", fill="#ffffff", width=.5, color='#000000') +
+  scale_y_continuous(labels=percent) + 
+  theme_classic() + 
+  labs(y="RA Incidence", x='CRP mg/L') + 
+  theme(axis.ticks=element_blank(), 
+        axis.text=element_text(face="bold", size=rel(1), color="#000000"), 
+        axis.title=element_text(size=rel(1.5), face="bold"),
+        #plot.title=element_text(size=rel(1.5), hjust=-.15, face="bold"),
+        axis.line = element_line(size=rel(2)))
+
+
+#BMI
+bmi <- data %>% select(WTSAF2YR, BMXBMI, LBXCRP) %>%
+  drop_na(LBXCRP, BMXBMI) %>%
+  mutate(crp = LBXCRP * 10) %>% # I THIN GRAYDEN FORGOT THIS LINE OF CODE WHEN CONSTRUCTING THE BMI PLOT (I AM ASSUMING THIS BASED ON THE CODE AFTER #RA INDICENCE)
+  mutate(bmi_binary = ifelse(BMXBMI < 30, 0, 1), low_crp = crp <= 1, med_crp = crp >1 & crp <=3, high_crp = crp>3) %>%
+  mutate_at(vars(matches('bmi_binary')), factor, levels=c(0,1), labels=c('BMI < 30', 'BMI >= 30')) %>%
+  group_by(bmi_binary) %>%
+  arrange(LBXCRP) %>%
+  mutate(wt = cumsum(WTSAF2YR/sum(WTSAF2YR)))
+
+bmi <- bmi %>% ggplot(aes(x=LBXCRP*10,y=wt, color=bmi_binary)) + 
+  geom_line(na.rm=TRUE, size=1) + 
+  labs(x='', y='', title="Obese") + 
+  theme_tufte() + 
+  theme(legend.position = c(.6,.4), legend.text=element_text(size=rel(.8)),
+        legend.key.width=unit(1, "cm"), legend.background=element_rect(fill="#ffffff",
+        color="#eeeeee") ,axis.title=element_blank(),
+        axis.text=element_text(color="black"),
+        panel.grid.major.y=element_line(color="#eeeeee"), 
+        plot.title=element_text(size=rel(1.2), hjust=-.1),
+        legend.title=element_blank()) +
+  xlim(c(0,31)) + 
+  scale_y_continuous(labels=percent) + 
+  scale_color_manual(values=c("#999999", "#000000"))
+
+
+#TRIGLYCERIDE
+df <- data %>% mutate(crp = LBXCRP * 10) %>%
+  filter(LBXTR < 1000) %>%
+  mutate(crp_class = ifelse(crp <= 1, "Low", ifelse(crp <= 3, "Med", "High"))) %>%
+  select(WTSAF2YR, LBXTR, crp_class) %>% drop_na()
+df$crp_class <- ordered(df$crp_class, levels=c("Low", "Med", "High"))
+
+df %<>% mutate(crp_class_p = ifelse(crp_class=="Low", WTSAF2YR/sum(WTSAF2YR[df$crp_class=="Low"], na.rm=TRUE), ifelse(crp_class=="Med", WTSAF2YR/sum(WTSAF2YR[df$crp_class=="Med"],na.rm=TRUE), WTSAF2YR/sum(WTSAF2YR[df$crp_class=="High"], na.rm=TRUE))))
+
+df$LBXTR <- cut(df$LBXTR, 31, ordered_result=TRUE, labels=seq(10,1000,length.out=31))
+
+df %<>% group_by(crp_class, LBXTR) %>% summarise(crp_class_p = sum(crp_class_p)) %>% ungroup() %>% group_by(crp_class)
+
+crp_class <- c(rep("Low", times=31),rep("Med",times=31), rep("High", times=31))
+crp_class <- data.frame(crp_class) %>% mutate(LBXTR=ordered(rep(seq(10,1000,length.out=31),times=3))) %>% unite(id, sep="_")
+df %<>% unite(id, crp_class, LBXTR, sep="_")
+df <- left_join(crp_class, df)
+df %<>% separate(id, c('crp_class', 'LBXTR'), sep="_")
+df$LBXTR <- ordered(as.numeric(df$LBXTR))
+
+
+df$crp_class_p[is.na(df['crp_class_p'])] <- 0
+
+df$crp_class = factor(df$crp_class, levels=c("Low", "Med", "High"), labels=c("<1", "1-3", ">3"))
+
+tri_crp <- df %>% filter(LBXTR < 406) %>%
+  ggplot(aes(LBXTR, y=crp_class_p, linetype=crp_class, group=crp_class, shape=crp_class)) + 
+  geom_line() + 
+  geom_point() + 
+  theme_classic() + 
+  theme(axis.line = element_line(size=rel(2)),
+        #axis.title.y=element_blank(),
+        axis.title=element_text(size=(rel(1.5)), face="bold"), 
+        axis.text.x=element_text(margin=margin(10,0,0,0), face="bold", size=rel(1.2), color="#000000"), 
+        axis.text.y = element_text(face="bold", size=rel(1.2), color="#000000"),
+        plot.title = element_text(size=rel(1.5), hjust=-.15, face="bold"),
+        legend.position=c(.75,.6),
+        legend.background=element_rect(color='#000000')) +
+  scale_y_continuous(labels=percent) + labs(x="Triglyceride mg/L", y="% of sample") +
+  guides(linetype=guide_legend(title="CRP mg/L"), 
+         shape=guide_legend(title="CRP mg/L"))
+
+#DEPRESSION
+df <- data %>% mutate(crp = LBXCRP * 10) %>%
+  mutate(crp_class = ifelse(crp <= 1, "Low", ifelse(crp <= 3, "Med", "High"))) %>%
+  select(WTSAF2YR, depr_severity, crp_class) %>% drop_na()
+df$crp_class <- ordered(df$crp_class, levels=c("Low", "Med", "High"))
+
+df %<>% mutate(crp_class_p = ifelse(crp_class=="Low", WTSAF2YR/sum(WTSAF2YR[df$crp_class=="Low"], na.rm=TRUE), ifelse(crp_class=="Med", WTSAF2YR/sum(WTSAF2YR[df$crp_class=="Med"],na.rm=TRUE), WTSAF2YR/sum(WTSAF2YR[df$crp_class=="High"], na.rm=TRUE))))
+
+df$depr_severity <- cut(df$depr_severity, 28, ordered_result=TRUE, labels=seq(0,27,length.out=28))
+
+crp_class <- c(rep("Low", times=28),rep("Med",times=28), rep("High", times=28))
+crp_class <- data.frame(crp_class) %>% mutate(depr_severity=ordered(rep(seq(0,27,length.out=28),times=3))) %>% unite(id, sep="_")
+df %<>% unite(id, crp_class, depr_severity, sep="_")
+df <- left_join(crp_class, df)
+df %<>% separate(id, c('crp_class', 'depr_severity'), sep="_")
+df$depr_severity <- ordered(as.numeric(df$depr_severity))
+
+
+
+df %<>% group_by(crp_class, depr_severity) %>% summarise(crp_class_p = sum(crp_class_p)) %>% ungroup() %>% group_by(crp_class)
+
+df$crp_class_p[is.na(df['crp_class_p'])] <- 0
+
+df$crp_class = factor(df$crp_class, levels=c("Low", "Med", "High"), labels=c("<1", "1-3", ">3"))
+
+depr_crp <- df %>% filter(depr_severity >= 5) %>% 
+  ggplot(aes(depr_severity, y=crp_class_p, linetype=crp_class, group=crp_class, shape=crp_class)) + 
+  geom_line() + 
+  geom_point() + 
+  theme_classic() + 
+  theme(axis.line=element_line(size=rel(2)), 
+        axis.title=element_text(size=rel(1.5), face="bold"), 
+        axis.text.x=element_text(margin=margin(10,0,0,0), face="bold", size=rel(1.2), color="#000000"), 
+        plot.title = element_text(size=rel(1.5), hjust=-.15, face="bold"),
+        axis.text.y = element_text(face="bold", color="#000000", size=rel(1.2)),
+        axis.ticks=element_blank(),
+        legend.position=c(.75,.6),
+        legend.background=element_rect(color='#000000')) + 
+  labs(x="Depression (PHQ-9)", y="% of sample") + 
+  guides(linetype=guide_legend(title="CRP mg/L"), 
+         shape=guide_legend(title="CRP mg/L")) + 
+  scale_y_continuous(labels=percent, limits=c(0,.05)) +
+  scale_x_discrete(breaks=seq(0,27,1))
+
+fig4 <- grid.arrange(ra_inc, depr_crp, tri_crp, bmi_crp, nrow=2)
+
+ggsave("figure_4.png", fig4, width=unit(12, "in"), height=unit(8, "in"))
+```
+
+
+# Tile Plot
+```{r}
+df <- data %>% mutate(crp = LBXCRP * 10) %>%
+  mutate(crp_class = ifelse(crp <= 1, "Low", ifelse(crp <= 3, "Med", "High"))) %>%
+  mutate(depr_class = ifelse(depr_severity <= 5, NA, ifelse(depr_severity <= 15, "Mild","Severe"))) %>%
+  mutate(tri_class = ifelse(LBXTR <= 150, "Low", ifelse(LBXTR <= 200, "Borderline-High", "High"))) %>%
+  mutate(bmi_class = ifelse(BMXBMI <= 25, "Low", ifelse(BMXBMI <= 30, "Med", "High"))) %>%
+  select(crp_class, depr_class, tri_class, bmi_class, MCQ190) %>%
+  group_by(crp_class, depr_class, tri_class, bmi_class) %>%
+  summarise(n=n(), ra = sum(MCQ190=='Rheumatoid', na.rm=TRUE)) %>%
+  mutate(p=ra/n)
+
+df$crp_class <- ordered(df$crp_class, levels=c("Low", "Med", "High"))
+df$bmi_class <- ordered(df$bmi_class, levels=c("Low", "Med", "High"))
+df$depr_class[df$depr_class %in% c(NA)] <- "NA"
+df$depr_class <- ordered(df$depr_class, levels=c("NA", "Mild", "Severe"))
+df$tri_class <- ordered(df$tri_class, levels=c('Low', 'Borderline-High', 'High'))
+
+TP1 <- df %>% drop_na(bmi_class, crp_class) %>% group_by(bmi_class, depr_class, crp_class) %>% summarise(n=sum(n, na.rm=TRUE), ra=sum(ra, na.rm=TRUE)) %>% mutate(p=ra/n) %>% ggplot(aes(x=depr_class, y=bmi_class, fill=p)) + geom_tile(color='#eeeeee') + geom_text(aes(label=n), vjust=-1) + geom_text(aes(label=ra), vjust=1) + theme_tufte() + theme(axis.ticks=element_blank(), legend.position=c(.60, 1.12), legend.direction="horizontal", legend.key.width=unit(2, 'cm')) + facet_wrap(~crp_class) + labs(title="CRP", y="BMI", x="Depression") + guides(fill=guide_colorbar(title="RA Incidence")) + scale_fill_continuous(type="viridis", labels=percent, limits=c(0, .76))
+
+TP2 <- df %>% drop_na(bmi_class, crp_class, tri_class) %>% group_by(bmi_class, tri_class, crp_class) %>% summarise(n=sum(n, na.rm=TRUE), ra=sum(ra, na.rm=TRUE)) %>% mutate(p=ra/n) %>% ggplot(aes(x=tri_class, y=bmi_class, fill=p)) + geom_tile(color='#eeeeee') + geom_text(aes(label=n), vjust=-1) + geom_text(aes(label=ra), vjust=1) + theme_tufte() + theme(axis.ticks=element_blank(), legend.position=c(.60, 1.12), legend.direction="horizontal", legend.key.width=unit(2, 'cm'), strip.text=element_blank()) + facet_wrap(~crp_class) + labs(y="BMI", x="Triglyceride") + guides(fill='none') + scale_fill_continuous(type="viridis", labels=percent, limits=c(0, .76))
+
+TP3 <- df %>% drop_na(crp_class, tri_class) %>% group_by(depr_class, tri_class, crp_class) %>% summarise(n=sum(n, na.rm=TRUE), ra=sum(ra, na.rm=TRUE)) %>% mutate(p=ra/n) %>% ggplot(aes(x=tri_class, y=depr_class, fill=p)) + geom_tile(color='#eeeeee') + geom_text(aes(label=n), vjust=-1) + geom_text(aes(label=ra), vjust=1) + theme_tufte() + theme(axis.ticks=element_blank(), legend.position=c(.60, 1.12), legend.direction="horizontal", legend.key.width=unit(2, 'cm'), strip.text=element_blank()) + facet_wrap(~crp_class) + labs(y="Depression", x="Triglyceride") + guides(fill='none') + scale_fill_continuous(type="viridis", labels=percent, limits=c(0, .76))
+
+```
+
+```{r}
+TP1
+TP2
+TP3
+```
+
+
+```{r}
+df <- data %>% mutate(crp = LBXCRP * 10) %>%
+  mutate(crp_class = ifelse(crp < 1, "< 1", ifelse(crp < 3, "1 - 3", "> 3"))) %>%
+  mutate(depr_class = ifelse(depr_severity < 10, NA, '>=  10')) %>%
+  mutate(tri_class = ifelse(LBXTR < 150, "< 150", ">= 150")) %>%
+  mutate(bmi_class = ifelse(BMXBMI < 30, "< 30", ">= 30")) %>%
+  select(crp_class, depr_class, tri_class, bmi_class, MCQ190) %>%
+  group_by(crp_class, depr_class, tri_class, bmi_class) %>%
+  summarise(n=n(), ra = sum(MCQ190=='Rheumatoid', na.rm=TRUE)) %>%
+  mutate(p=ra/n)
+
+df$crp_class <- ordered(df$crp_class, levels=c("< 1", "1 - 3", "> 3"))
+df$bmi_class <- ordered(df$bmi_class, levels=c("< 30", ">= 30"))
+df$depr_class[df$depr_class %in% c(NA)] <- "< 10"
+df$depr_class <- ordered(df$depr_class, levels=c("< 10", ">=  10"))
+df$tri_class <- ordered(df$tri_class, levels=c('< 150', '>= 30'))
+
+df %>% drop_na(bmi_class, crp_class) %>% group_by(bmi_class, depr_class, crp_class) %>% summarise(n=sum(n, na.rm=TRUE), ra=sum(ra, na.rm=TRUE)) %>% mutate(p=ra/n) %>% ggplot(aes(x=depr_class, y=bmi_class, fill=p)) + geom_tile(color='#eeeeee') + geom_text(aes(label=n), vjust=-1) + geom_text(aes(label=ra), vjust=1) + theme_tufte() + theme(axis.ticks=element_blank(), legend.position=c(.60, 1.12), legend.direction="horizontal", legend.key.width=unit(2, 'cm')) + facet_wrap(~crp_class) + labs(title="", y="BMI", x="Depression") + guides(fill=guide_colorbar(title="RA Incidence")) + scale_fill_continuous(type="viridis", labels=percent, limits=c(0, .4))
+
+df %>% drop_na(bmi_class, crp_class, tri_class) %>% group_by(bmi_class, tri_class, crp_class) %>% summarise(n=sum(n, na.rm=TRUE), ra=sum(ra, na.rm=TRUE)) %>% mutate(p=ra/n) %>% ggplot(aes(x=tri_class, y=bmi_class, fill=p)) + geom_tile(color='#eeeeee') + geom_text(aes(label=n), vjust=-1) + geom_text(aes(label=ra), vjust=1) + theme_tufte() + theme(axis.ticks=element_blank(), legend.position=c(.60, 1.12), legend.direction="horizontal", legend.key.width=unit(2, 'cm'), strip.text=element_blank()) + facet_wrap(~crp_class) + labs(y="BMI", x="Triglyceride") + guides(fill='none') + scale_fill_continuous(type="viridis", labels=percent, limits=c(0, .4))
+
+df %>% drop_na(crp_class, tri_class) %>% group_by(depr_class, tri_class, crp_class) %>% summarise(n=sum(n, na.rm=TRUE), ra=sum(ra, na.rm=TRUE)) %>% mutate(p=ra/n) %>% ggplot(aes(x=tri_class, y=depr_class, fill=p)) + geom_tile(color='#eeeeee') + geom_text(aes(label=n), vjust=-1) + geom_text(aes(label=ra), vjust=1) + theme_tufte() + theme(axis.ticks=element_blank(), legend.position=c(.60, 1.12), legend.direction="horizontal", legend.key.width=unit(2, 'cm'), strip.text=element_blank()) + facet_wrap(~crp_class) + labs(y="Depression", x="Triglyceride") + guides(fill='none') + scale_fill_continuous(type="viridis", labels=percent, limits=c(0, .4))
+```
+
+
+```{r}
+df <- data %>% mutate(crp = LBXCRP * 10) %>%
+  mutate(crp_class = ifelse(crp < 1, "< 1", ifelse(crp < 3, "1 - 3", "> 3"))) %>%
+  mutate(depr_class = ifelse(depr_severity < 10, NA, '>= 10')) %>%
+  mutate(tri_class = ifelse(LBXTR < 150, "< 150", ">= 150")) %>%
+  mutate(bmi_class = ifelse(BMXBMI < 30, "< 30", ">= 30")) %>%
+  select(crp_class, depr_class, tri_class, bmi_class, MCQ190, WTSAF2YR) %>%
+  group_by(crp_class, depr_class, tri_class, bmi_class) %>%
+  summarise(n=round(sum(WTSAF2YR),0), ra = round(sum(WTSAF2YR[MCQ190=='Rheumatoid'], na.rm=TRUE))) %>%
+  mutate(p=ra/n)
+
+df$crp_class <- ordered(df$crp_class, levels=c("< 1", "1 - 3", "> 3")) #, labels=c("CRP<1mg/L", "1mg/L<CRP<3mg/L", "3mg/L<CRP"))
+df$bmi_class <- ordered(df$bmi_class, levels=c("< 30", ">= 30")) #, labels=c('No','Yes'))
+df$depr_class[df$depr_class %in% c(NA)] <- "< 10"
+df$depr_class <- ordered(df$depr_class, levels=c("< 10", ">= 10")) #, labels=c('No', 'Yes'))
+df$tri_class <- ordered(df$tri_class, levels=c('< 150', '>= 150')) #, labels=c('No', 'Yes'))
+
+
+BMIDepr.plot.2 <- df %>% drop_na(bmi_class, crp_class) %>% 
+  group_by(bmi_class, depr_class, crp_class) %>% 
+  summarise(n=sum(n, na.rm=TRUE), ra=sum(ra, na.rm=TRUE)) %>% 
+  mutate(p=ra/n) %>% 
+  ggplot(aes(x=depr_class, y=bmi_class, fill=p)) + 
+  geom_tile(color='#eeeeee') + geom_label(aes(label=percent(p)), fill="#ffffff") + 
+  theme_tufte() + facet_wrap(~crp_class) + 
+theme(axis.ticks=element_blank(), legend.position=c(.5, 1.12), legend.direction="horizontal", legend.key.width=unit(2.8, 'cm'), strip.text=element_blank()) + facet_wrap(~crp_class) + 
+  labs(title="", y="BMI", x="Depression") + guides(fill=guide_colorbar(title="RA Incidence")) + scale_fill_continuous(type="viridis", labels=percent, limits=c(0, .35))
+
+BMIDepr.plot.NoHeader.2 <- df %>% drop_na(bmi_class, crp_class) %>% 
+  group_by(bmi_class, depr_class, crp_class) %>% 
+  summarise(n=sum(n, na.rm=TRUE), ra=sum(ra, na.rm=TRUE)) %>% 
+  mutate(p=ra/n) %>% ggplot(aes(x=depr_class, y=bmi_class, fill=p)) +
+  geom_tile(color='#eeeeee') + 
+  geom_label(aes(label=percent(p)), fill="#ffffff") + theme_tufte()  +
+  facet_wrap(~crp_class) + 
+theme(axis.ticks=element_blank(), legend.position=c(.5, 1.12), legend.direction="horizontal", legend.key.width=unit(2.8, 'cm'), strip.text=element_blank()) + 
+  labs(y="BMI", x="Depression") + guides(fill="none") +
+  scale_fill_continuous(type="viridis", labels=percent, limits=c(0, .35))
+
+BMITrigly.plot.2 <- df %>% drop_na(bmi_class, crp_class, tri_class) %>% group_by(bmi_class, tri_class, crp_class) %>% summarise(n=sum(n, na.rm=TRUE), ra=sum(ra, na.rm=TRUE)) %>% mutate(p=ra/n) %>% ggplot(aes(x=tri_class, y=bmi_class, fill=p)) + geom_tile(color='#eeeeee') + geom_label(aes(label=percent(p)), fill="#ffffff") + theme_tufte() + 
+  theme(axis.ticks=element_blank(), legend.position=c(.5, 1.12), legend.direction="horizontal", legend.key.width=unit(2.8, 'cm'), strip.text=element_blank()) + facet_wrap(~crp_class) + 
+  facet_wrap(~crp_class) + labs(y="BMI", x="Triglyceride") + guides(fill='none') + scale_fill_continuous(type="viridis", labels=percent, limits=c(0, .35))
+
+DeprTrigly.plot.2 <- df %>% drop_na(crp_class, tri_class) %>% group_by(depr_class, tri_class, crp_class) %>% summarise(n=sum(n, na.rm=TRUE), ra=sum(ra, na.rm=TRUE)) %>% mutate(p=ra/n) %>% ggplot(aes(x=tri_class, y=depr_class, fill=p)) + geom_tile(color='#eeeeee') + geom_label(aes(label=percent(p)), fill="#ffffff") + theme_tufte() + 
+theme(axis.ticks=element_blank(), legend.position=c(.5, 1.12), legend.direction="horizontal", legend.key.width=unit(2.8, 'cm'), strip.text=element_blank()) + facet_wrap(~crp_class) + facet_wrap(~crp_class) + labs(y="Depression", x="Triglyceride") + guides(fill='none') + scale_fill_continuous(type="viridis", labels=percent, limits=c(0, .35))
+
+# LEON - 11/5/2019: Replaced Hypertriglyceridemia with Triglyceride
+```
+
+```{r}
+ggsave(filename = "~/Desktop/BMIDepr_2.pdf", plot = BMIDepr.plot.2, units = "in", device = pdf(), width = 6.32, height = 2.22)
+```
+
+
+
+```{r}
+df <- data %>% mutate(crp = LBXCRP * 10) %>%
+  mutate(crp_class = ifelse(crp < 1, "< 1", ifelse(crp < 3, "1 - 3", "> 3"))) %>%
+  mutate(depr_class = ifelse(depr_severity < 10, NA, '>= 10')) %>%
+  mutate(tri_class = ifelse(LBXTR < 150, "< 150", ">= 150")) %>%
+  mutate(bmi_class = ifelse(BMXBMI < 30, "< 30", ">= 30")) %>%
+  select(crp_class, depr_class, tri_class, bmi_class, MCQ190, WTSAF2YR) %>%
+  group_by(crp_class, depr_class, tri_class, bmi_class) %>%
+  summarise(n=round(sum(WTSAF2YR),0), ra = round(sum(WTSAF2YR[MCQ190=='Rheumatoid'], na.rm=TRUE))) %>%
+  mutate(p=ra/n)
+
+df$crp_class <- ordered(df$crp_class, levels=c("< 1", "1 - 3", "> 3"))
+df$bmi_class <- ordered(df$bmi_class, levels=c("< 30", ">= 30"))
+df$depr_class[df$depr_class %in% c(NA)] <- "< 10"
+df$depr_class <- ordered(df$depr_class, levels=c("< 10", ">= 10"))
+df$tri_class <- ordered(df$tri_class, levels=c('< 150', '>= 150'))
+
+
+# BMIDepr.plot <- 
+#svg("~/Desktop/BMIDepr.svg", width = 6, height = 4, pointsize = 12, family = "sans")
+BMIDepr.plot <- df %>% drop_na(bmi_class, crp_class) %>% group_by(bmi_class, depr_class, crp_class) %>% summarise(n=sum(n, na.rm=TRUE), ra=sum(ra, na.rm=TRUE)) %>% mutate(p=ra/n) %>% ggplot(aes(x=depr_class, y=bmi_class, fill=n)) + geom_tile(color='#eeeeee') + theme_tufte() + facet_wrap(~crp_class) + theme(axis.ticks=element_blank(), legend.position=c(.5, 1.2), legend.direction="horizontal", legend.key.width=unit(2.50, 'cm'), strip.text=element_text(size=rel(1.4), margin=margin(10,0,10,0)), legend.title=element_text(vjust=.7)) + labs(title="", y="BMI", x="Depression") + guides(fill=guide_colorbar(title='N')) + scale_fill_continuous(type="viridis", labels=comma, limits=c(0,50046572))
+#dev.off()
+
+BMIDepr.plot <- df %>% drop_na(bmi_class, crp_class) %>% group_by(bmi_class, depr_class, crp_class) %>% summarise(n=sum(n, na.rm=TRUE), ra=sum(ra, na.rm=TRUE)) %>% mutate(p=ra/n) %>% ggplot(aes(x=depr_class, y=bmi_class, fill=n)) + geom_tile(color='#eeeeee') + theme_tufte() + facet_wrap(~crp_class) + 
+    theme(axis.ticks=element_blank(), legend.position=c(.5, 1.12), legend.direction="horizontal", legend.key.width=unit(2.8, 'cm'), strip.text=element_blank()) + 
+facet_wrap(~crp_class) + 
+  labs(y="BMI", x="Depression") + guides(fill="none") + scale_fill_continuous(type="viridis", labels=comma, limits=c(0,50046572))
+
+df %>% drop_na(bmi_class, crp_class) %>% group_by(bmi_class, depr_class, crp_class) %>% summarise(n=sum(n, na.rm=TRUE), ra=sum(ra, na.rm=TRUE)) %>% mutate(p=ra/n) %>% ggplot(aes(x=depr_class, y=bmi_class, fill=n)) + geom_tile(color='#eeeeee') + theme_tufte() + 
+  theme(axis.ticks=element_blank(), legend.position=c(.5, 1.12), legend.direction="horizontal", legend.key.width=unit(2.8, 'cm'), strip.text=element_blank()) + facet_wrap(~crp_class) + 
+  labs(y="BMI", x="Depression") + guides(fill="none") + scale_fill_continuous(type="viridis", labels=comma, limits=c(0,50046572))
+
+
+BMITrigly.plot <- df %>% drop_na(bmi_class, crp_class, tri_class) %>% group_by(bmi_class, tri_class, crp_class) %>% summarise(n=sum(n, na.rm=TRUE), ra=sum(ra, na.rm=TRUE)) %>% mutate(p=ra/n) %>% ggplot(aes(x=tri_class, y=bmi_class, fill=n)) + geom_tile(color='#eeeeee') + theme_tufte() + theme(axis.ticks=element_blank(), legend.position=c(.60, 1.12), legend.direction="horizontal", legend.key.width=unit(2, 'cm'), strip.text=element_blank()) + facet_wrap(~crp_class) + labs(y="BMI", x="Triglyceride") + guides(fill='none') + scale_fill_continuous(type="viridis", labels=comma, limits=c(0,50046572))
+
+DeprTrigly.plot <- df %>% drop_na(crp_class, tri_class) %>% group_by(depr_class, tri_class, crp_class) %>% summarise(n=sum(n, na.rm=TRUE), ra=sum(ra, na.rm=TRUE)) %>% mutate(p=ra/n) %>% ggplot(aes(x=tri_class, y=depr_class, fill=n)) + geom_tile(color='#eeeeee') + theme_tufte() + theme(axis.ticks=element_blank(), legend.position=c(.60, 1.12), legend.direction="horizontal", legend.key.width=unit(2, 'cm'), strip.text=element_blank()) + facet_wrap(~crp_class) + labs(y="Depression", x="Triglyceride") + guides(fill='none') + scale_fill_continuous(type="viridis", labels=comma, limits=c(0,50046572))
+```
+
+```{r}
+ggsave(filename = "~/Desktop/BMIDepr.svg", device = "svg", plot = BMIDepr.plot)
+```
+
+# Chi Sq
+## Four-way
+```{r}
+df <- data %>% mutate(crp = LBXCRP * 10) %>%
+  mutate(crp_class = ifelse(crp < 1, "Low CRP", ifelse(crp < 3, "Med CRP", "High CRP"))) %>%
+  mutate(depr_class = ifelse(depr_severity < 10, NA, 'High')) %>%
+  mutate(tri_class = ifelse(LBXTR < 150, "Low", "High")) %>%
+  mutate(bmi_class = ifelse(BMXBMI < 30, "Low", "High")) %>%
+  select(crp_class, depr_class, tri_class, bmi_class, MCQ190, WTSAF2YR) %>%
+  group_by(crp_class, depr_class, tri_class, bmi_class) %>%
+  summarise(n=sum(WTSAF2YR), n0=n())
+
+df$crp_class <- ordered(df$crp_class, levels=c("Low CRP", "Med CRP", "High CRP"))
+df$bmi_class <- ordered(df$bmi_class, levels=c("Low", "High"))
+df$depr_class[df$depr_class %in% c(NA)] <- "Low"
+df$depr_class <- ordered(df$depr_class, levels=c("Low", "High"))
+df$tri_class <- ordered(df$tri_class, levels=c('Low', 'High'))
+
+df$n2 = df$n/sum(df$n)*4136
+
+df %<>% select(-n) %>% drop_na(crp_class, tri_class, bmi_class) %>% arrange(desc(crp_class), desc(depr_class), desc(tri_class), desc(bmi_class))
+
+
+### Multi Dimensional Chisq Analysis for Comorbidities
+w_sum <- sum(df$n2)
+
+ev <- c()
+for (i in 1:24) {ev[i] <- sum(df$n2[df$crp_class==df$crp_class[i]])*
+  sum(df$n2[df$depr_class==df$depr_class[i]])*
+  sum(df$n2[df$tri_class==df$tri_class[i]])*
+  sum(df$n2[df$bmi_class==df$bmi_class[i]])/
+  w_sum^3}
+df$exp_v <- ev
+df$chisq <- (df$exp_v - df$n2)^2/df$exp_v
+paste("Chisq Statistic: ", sum(df$chisq))
+degfree = 2
+paste("Degrees of Freedom: ", degfree)
+
+paste("p-value: ", pchisq(899.2566, df=degfree, lower.tail=FALSE))
+
+df %<>% mutate(residuals=(n2-exp_v)/sqrt(exp_v))
+
+#write_csv(df, 'chi_sq1_results.csv')
+```
+
+### Unweighted
+```{r}
+df <- data %>% mutate(crp = LBXCRP * 10) %>%
+  mutate(crp_class = ifelse(crp < 1, "Low CRP", ifelse(crp < 3, "Med CRP", "High CRP"))) %>%
+  mutate(depr_class = ifelse(depr_severity < 10, NA, 'High')) %>%
+  mutate(tri_class = ifelse(LBXTR < 150, "Low", "High")) %>%
+  mutate(bmi_class = ifelse(BMXBMI < 30, "Low", "High")) %>%
+  select(crp_class, depr_class, tri_class, bmi_class, MCQ190, WTSAF2YR) %>%
+  group_by(crp_class, depr_class, tri_class, bmi_class) %>%
+  summarise(n=sum(WTSAF2YR), n0=n())
+
+df$crp_class <- ordered(df$crp_class, levels=c("Low CRP", "Med CRP", "High CRP"))
+df$bmi_class <- ordered(df$bmi_class, levels=c("Low", "High"))
+df$depr_class[df$depr_class %in% c(NA)] <- "Low"
+df$depr_class <- ordered(df$depr_class, levels=c("Low", "High"))
+df$tri_class <- ordered(df$tri_class, levels=c('Low', 'High'))
+
+df$n2 = df$n/sum(df$n)*4136
+
+df %<>% select(-n) %>% drop_na(crp_class, tri_class, bmi_class) %>% arrange(desc(crp_class), desc(depr_class), desc(tri_class), desc(bmi_class))
+
+
+### Multi Dimensional Chisq Analysis for Comorbidities
+df$n0 <- as.numeric(df$n0)
+w_sum <- sum(df$n0)
+
+ev <- c()
+for (i in 1:24) {ev[i] <- sum(df$n0[df$crp_class==df$crp_class[i]])*
+  sum(df$n0[df$depr_class==df$depr_class[i]])*
+  sum(df$n0[df$tri_class==df$tri_class[i]], na.rm=TRUE)*
+  sum(df$n0[df$bmi_class==df$bmi_class[i]])/
+  w_sum^3}
+
+df$exp_v <- ev
+df$chisq <- (df$exp_v - df$n0)^2/df$exp_v
+paste("Chisq Statistic: ", sum(df$chisq))
+degfree = 3
+paste("Degrees of Freedom: ", degfree)
+
+paste("p-value: ", pchisq(899.2566, df=degfree, lower.tail=FALSE))
+
+df %<>% mutate(residuals=(n0-exp_v)/sqrt(exp_v))
+
+
+#write_csv(df, 'chi_sq1_results_unweighted.csv')
+```
+
+
+
+## Five-way
+```{r}
+df <- data %>% mutate(crp = LBXCRP * 10) %>%
+  mutate(crp_class = ifelse(crp < 1, "Low CRP", ifelse(crp < 3, "Med CRP", "High CRP"))) %>%
+  mutate(depr_class = ifelse(depr_severity < 10, NA, 'High')) %>%
+  mutate(tri_class = ifelse(LBXTR < 150, "Low", "High")) %>%
+  mutate(bmi_class = ifelse(BMXBMI < 30, "Low", "High")) %>%
+  select(crp_class, depr_class, tri_class, bmi_class, MCQ190, WTSAF2YR) %>%
+  group_by(crp_class, depr_class, tri_class, bmi_class, MCQ190) %>%
+  summarise(n=sum(WTSAF2YR))
+
+df$crp_class <- ordered(df$crp_class, levels=c("Low CRP", "Med CRP", "High CRP"))
+df$bmi_class <- ordered(df$bmi_class, levels=c("Low", "High"))
+df$depr_class[df$depr_class %in% c(NA)] <- "Low"
+df$depr_class <- ordered(df$depr_class, levels=c("Low", "High"))
+df$tri_class <- ordered(df$tri_class, levels=c('Low', 'High'))
+df$MCQ190[df$MCQ190 %in% c(NA)] <- "No Arthritis"
+df$MCQ190 <- factor(df$MCQ190)
+
+
+df$n2 = df$n/sum(df$n)*4136
+
+df %<>% select(-n) %>% drop_na(crp_class, tri_class, bmi_class) %>% arrange(desc(crp_class), desc(depr_class), desc(tri_class), desc(bmi_class))
+
+
+### Multi Dimensional Chisq Analysis for Comorbidities
+w_sum <- sum(df$n2)
+
+ev <- c()
+for (i in 1:47) {ev[i] <- sum(df$n2[df$crp_class==df$crp_class[i]])*
+  sum(df$n2[df$depr_class==df$depr_class[i]])*
+  sum(df$n2[df$tri_class==df$tri_class[i]])*
+  sum(df$n2[df$bmi_class==df$bmi_class[i]])*sum(df$n2[df$MCQ190 == df$MCQ190[i]])/
+  w_sum^4}
+df$exp_v <- ev
+df$chisq <- (df$exp_v - df$n2)^2/df$exp_v
+paste("Chisq Statistic: ", sum(df$chisq))
+degfree = 2
+paste("Degrees of Freedom: ", degfree)
+
+paste("p-value: ", pchisq(1202.77358423449, df=degfree, lower.tail=FALSE))
+
+df$chisq <- round(df$chisq,2)
+
+df %<>% mutate(residuals=(n2-exp_v)/sqrt(exp_v))
+
+#write_csv(df, 'chi_sq2_results.csv')
+
+```
+
+### Unweighted
+```{r}
+df <- data %>% mutate(crp = LBXCRP * 10) %>%
+  mutate(crp_class = ifelse(crp < 1, "Low CRP", ifelse(crp < 3, "Med CRP", "High CRP"))) %>%
+  mutate(depr_class = ifelse(depr_severity < 10, NA, 'High')) %>%
+  mutate(tri_class = ifelse(LBXTR < 150, "Low", "High")) %>%
+  mutate(bmi_class = ifelse(BMXBMI < 30, "Low", "High")) %>%
+  select(crp_class, depr_class, tri_class, bmi_class, MCQ190, WTSAF2YR) %>%
+  group_by(crp_class, depr_class, tri_class, bmi_class, MCQ190) %>%
+  summarise(n=sum(WTSAF2YR), n0=n())
+
+df$crp_class <- ordered(df$crp_class, levels=c("Low CRP", "Med CRP", "High CRP"))
+df$bmi_class <- ordered(df$bmi_class, levels=c("Low", "High"))
+df$depr_class[df$depr_class %in% c(NA)] <- "Low"
+df$depr_class <- ordered(df$depr_class, levels=c("Low", "High"))
+df$tri_class <- ordered(df$tri_class, levels=c('Low', 'High'))
+df$MCQ190[df$MCQ190 %in% c(NA)] <- "No Arthritis"
+df$MCQ190 <- factor(df$MCQ190)
+
+
+df$n2 = df$n/sum(df$n)*4136
+
+df %<>% select(-n) %>% drop_na(crp_class, tri_class, bmi_class) %>% arrange(desc(crp_class), desc(depr_class), desc(tri_class), desc(bmi_class))
+
+df$n0 <- as.numeric(df$n0)
+### Multi Dimensional Chisq Analysis for Comorbidities
+w_sum <- sum(df$n2)
+
+ev <- c()
+for (i in 1:47) {ev[i] <- sum(df$n0[df$crp_class==df$crp_class[i]])*
+  sum(df$n0[df$depr_class==df$depr_class[i]])*
+  sum(df$n0[df$tri_class==df$tri_class[i]])*
+  sum(df$n0[df$bmi_class==df$bmi_class[i]])*sum(df$n0[df$MCQ190 == df$MCQ190[i]])/
+  w_sum^4}
+df$exp_v <- ev
+df$chisq <- (df$exp_v - df$n0)^2/df$exp_v
+paste("Chisq Statistic: ", sum(df$chisq))
+degfree = 4
+paste("Degrees of Freedom: ", degfree)
+
+paste("p-value: ", pchisq(1202.77358423449, df=degfree, lower.tail=FALSE))
+
+df$chisq <- round(df$chisq,2)
+
+df %<>% mutate(residuals=(n0-exp_v)/sqrt(exp_v))
+
+write_csv(df, 'chi_sq2_results_unweighted.csv')
+```
+
+
+## Three Way
+### CRP<>BMI<>RA
+```{r}
+df <- data %>% mutate(crp = LBXCRP * 10) %>%
+  mutate(crp_class = ifelse(crp < 1, "Low CRP", ifelse(crp < 3, "Med CRP", "High CRP"))) %>%
+  mutate(depr_class = ifelse(depr_severity < 10, NA, 'High')) %>%
+  mutate(tri_class = ifelse(LBXTR < 150, "Low", "High")) %>%
+  mutate(bmi_class = ifelse(BMXBMI < 30, "Low", "High")) %>%
+  select(crp_class, bmi_class, MCQ190, WTSAF2YR) %>%
+  group_by(crp_class, bmi_class, MCQ190) %>%
+  summarise(n=sum(WTSAF2YR))
+
+df$crp_class <- ordered(df$crp_class, levels=c("Low CRP", "Med CRP", "High CRP"))
+df$bmi_class <- ordered(df$bmi_class, levels=c("Low", "High"))
+#df$depr_class[df$depr_class %in% c(NA)] <- "Low"
+#df$depr_class <- ordered(df$depr_class, levels=c("Low", "High"))
+#df$tri_class <- ordered(df$tri_class, levels=c('Low', 'High'))
+df$MCQ190[df$MCQ190 %in% c(NA)] <- "No Arthritis"
+df$MCQ190 <- factor(df$MCQ190)
+
+
+df$Observed = round(df$n/sum(df$n)*4136,0)
+
+df %<>% select(-n) %>% drop_na(crp_class, bmi_class) %>% arrange(desc(crp_class), desc(bmi_class))
+
+
+### Multi Dimensional Chisq Analysis for Comorbidities
+w_sum <- sum(df$Observed)
+
+ev <- c()
+for (i in 1:12) {ev[i] <- sum(df$Observed[df$crp_class==df$crp_class[i]])*
+  sum(df$Observed[df$bmi_class==df$bmi_class[i]])*
+  sum(df$Observed[df$MCQ190 == df$MCQ190[i]])/
+  w_sum^2}
+df$Expected <- ev
+df$Chisq <- (df$Expected - df$Observed)^2/df$Expected
+paste("Chisq Statistic: ", sum(df$Chisq))
+degfree = 7
+paste("Degrees of Freedom: ", degfree)
+
+paste("p-value: ", pchisq(sum(df$Chisq), df=degfree, lower.tail=FALSE))
+
+df$Chisq <- round(df$Chisq,2)
+
+df %<>% mutate(Std.Residuals=(Observed-Expected)/sqrt(Expected))
+
+names(df) <- c("CRP", "BMI", "RA", "Observed", "Expected", "Chisq", "Std.Residuals")
+levels(df$RA) <- c("No", "Yes")
+df <- df[, -6]
+
+#write_csv(df, 'chi_sq2_results.csv')
+```
+
+### CRP <> DEPR <> RA
+```{r}
+df <- data %>% mutate(crp = LBXCRP * 10) %>%
+  mutate(crp_class = ifelse(crp < 1, "Low CRP", ifelse(crp < 3, "Med CRP", "High CRP"))) %>%
+  mutate(depr_class = ifelse(depr_severity < 10, NA, 'High')) %>%
+  mutate(tri_class = ifelse(LBXTR < 150, "Low", "High")) %>%
+  mutate(bmi_class = ifelse(BMXBMI < 30, "Low", "High")) %>%
+  select(crp_class, depr_class, MCQ190, WTSAF2YR) %>%
+  group_by(crp_class, depr_class, MCQ190) %>%
+  summarise(n=sum(WTSAF2YR))
+
+df$crp_class <- ordered(df$crp_class, levels=c("Low CRP", "Med CRP", "High CRP"))
+#df$bmi_class <- ordered(df$bmi_class, levels=c("Low", "High"))
+df$depr_class[df$depr_class %in% c(NA)] <- "Low"
+df$depr_class <- ordered(df$depr_class, levels=c("Low", "High"))
+#df$tri_class <- ordered(df$tri_class, levels=c('Low', 'High'))
+df$MCQ190[df$MCQ190 %in% c(NA)] <- "No Arthritis"
+df$MCQ190 <- factor(df$MCQ190)
+
+
+df$Observed = round(df$n/sum(df$n)*4136,0)
+
+df %<>% select(-n) %>% drop_na(crp_class) %>% arrange(desc(crp_class), desc(depr_class))
+
+
+### Multi Dimensional Chisq Analysis for Comorbidities
+w_sum <- sum(df$Observed)
+
+ev <- c()
+for (i in 1:12) {ev[i] <- sum(df$Observed[df$crp_class==df$crp_class[i]])*
+  sum(df$Observed[df$depr_class==df$depr_class[i]])*
+  sum(df$Observed[df$MCQ190 == df$MCQ190[i]])/
+  w_sum^2}
+df$Expected <- ev
+df$Chisq <- (df$Expected - df$Observed)^2/df$Expected
+paste("Chisq Statistic: ", sum(df$Chisq))
+degfree = 7
+paste("Degrees of Freedom: ", degfree)
+
+paste("p-value: ", pchisq(sum(df$Chisq), df=degfree, lower.tail=FALSE))
+
+df$Chisq <- round(df$Chisq,2)
+
+df %<>% mutate(Std.Residuals=(Observed-Expected)/sqrt(Expected))
+
+names(df) <- c("CRP", "Depression", "RA", "Observed", "Expected", "Chisq", "Std.Residuals")
+levels(df$RA) <- c("No", "Yes")
+df <- df[, -6]
+```
+
+### CRP <> TRI <> RA
+```{r}
+df <- data %>% mutate(crp = LBXCRP * 10) %>%
+  mutate(crp_class = ifelse(crp < 1, "Low CRP", ifelse(crp < 3, "Med CRP", "High CRP"))) %>%
+  mutate(depr_class = ifelse(depr_severity < 10, NA, 'High')) %>%
+  mutate(tri_class = ifelse(LBXTR < 150, "Low", "High")) %>%
+  mutate(bmi_class = ifelse(BMXBMI < 30, "Low", "High")) %>%
+  select(crp_class, tri_class, MCQ190, WTSAF2YR) %>%
+  group_by(crp_class, tri_class, MCQ190) %>%
+  summarise(n=sum(WTSAF2YR))
+
+df$crp_class <- ordered(df$crp_class, levels=c("Low CRP", "Med CRP", "High CRP"))
+#df$bmi_class <- ordered(df$bmi_class, levels=c("Low", "High"))
+#df$depr_class[df$depr_class %in% c(NA)] <- "Low"
+#df$depr_class <- ordered(df$depr_class, levels=c("Low", "High"))
+df$tri_class <- ordered(df$tri_class, levels=c('Low', 'High'))
+df$MCQ190[df$MCQ190 %in% c(NA)] <- "No Arthritis"
+df$MCQ190 <- factor(df$MCQ190)
+
+
+df$Observed = round(df$n/sum(df$n)*4136,0)
+
+df %<>% select(-n) %>% drop_na(crp_class, tri_class) %>% arrange(desc(crp_class), desc(tri_class))
+
+
+### Multi Dimensional Chisq Analysis for Comorbidities
+w_sum <- sum(df$Observed)
+
+ev <- c()
+for (i in 1:12) {ev[i] <- sum(df$Observed[df$crp_class==df$crp_class[i]])*
+  sum(df$Observed[df$tri_class==df$tri_class[i]])*
+  sum(df$Observed[df$MCQ190 == df$MCQ190[i]])/
+  w_sum^2}
+df$Expected <- ev
+df$Chisq <- (df$Expected - df$Observed)^2/df$Expected
+paste("Chisq Statistic: ", sum(df$Chisq))
+degfree = 7
+paste("Degrees of Freedom: ", degfree)
+
+paste("p-value: ", pchisq(sum(df$Chisq), df=degfree, lower.tail=FALSE))
+
+df$Chisq <- round(df$Chisq,2)
+
+df %<>% mutate(Std.Residuals=(Observed-Expected)/sqrt(Expected))
+
+names(df) <- c("CRP", "Triglyceride", "RA", "Observed", "Expected", "Chisq", "Std.Residuals")
+levels(df$RA) <- c("No", "Yes")
+df <- df[, -6]
+```
+
+### TRI <> DEPR <> RA
+```{r}
+df <- data %>% mutate(crp = LBXCRP * 10) %>%
+  mutate(crp_class = ifelse(crp < 1, "Low CRP", ifelse(crp < 3, "Med CRP", "High CRP"))) %>%
+  mutate(depr_class = ifelse(depr_severity < 10, NA, 'High')) %>%
+  mutate(tri_class = ifelse(LBXTR < 150, "Low", "High")) %>%
+  mutate(bmi_class = ifelse(BMXBMI < 30, "Low", "High")) %>%
+  select(depr_class, tri_class, MCQ190, WTSAF2YR) %>%
+  group_by(depr_class, tri_class, MCQ190) %>%
+  summarise(n=sum(WTSAF2YR))
+
+#df$crp_class <- ordered(df$crp_class, levels=c("Low CRP", "Med CRP", "High CRP"))
+#df$bmi_class <- ordered(df$bmi_class, levels=c("Low", "High"))
+df$depr_class[df$depr_class %in% c(NA)] <- "Low"
+df$depr_class <- ordered(df$depr_class, levels=c("Low", "High"))
+df$tri_class <- ordered(df$tri_class, levels=c('Low', 'High'))
+df$MCQ190[df$MCQ190 %in% c(NA)] <- "No Arthritis"
+df$MCQ190 <- factor(df$MCQ190)
+
+
+df$Observed = round(df$n/sum(df$n)*4136,0)
+
+df %<>% select(-n) %>% drop_na(tri_class) %>% arrange(desc(depr_class), desc(tri_class))
+
+
+### Multi Dimensional Chisq Analysis for Comorbidities
+w_sum <- sum(df$Observed)
+
+ev <- c()
+for (i in 1:8) {ev[i] <- sum(df$Observed[df$depr_class==df$depr_class[i]])*
+  sum(df$Observed[df$tri_class==df$tri_class[i]])*
+  sum(df$Observed[df$MCQ190 == df$MCQ190[i]])/
+  w_sum^2}
+df$Expected <- ev
+df$Chisq <- (df$Expected - df$Observed)^2/df$Expected
+paste("Chisq Statistic: ", sum(df$Chisq))
+degfree = 4
+paste("Degrees of Freedom: ", degfree)
+
+paste("p-value: ", pchisq(sum(df$Chisq), df=degfree, lower.tail=FALSE))
+
+df$Chisq <- round(df$Chisq,2)
+
+df %<>% mutate(Std.Residuals=(Observed-Expected)/sqrt(Expected))
+
+names(df) <- c("Depression", "Triglyceride", "RA", "Observed", "Expected", "Chisq", "Std.Residuals")
+levels(df$RA) <- c("No", "Yes")
+df <- df[, -6]
+```
+
+### TRI <> BMI <> RA
+
+```{r}
+df <- data %>% mutate(crp = LBXCRP * 10) %>%
+  mutate(crp_class = ifelse(crp < 1, "Low CRP", ifelse(crp < 3, "Med CRP", "High CRP"))) %>%
+  mutate(depr_class = ifelse(depr_severity < 10, NA, 'High')) %>%
+  mutate(tri_class = ifelse(LBXTR < 150, "Low", "High")) %>%
+  mutate(bmi_class = ifelse(BMXBMI < 30, "Low", "High")) %>%
+  select(bmi_class, tri_class, MCQ190, WTSAF2YR) %>%
+  group_by(bmi_class, tri_class, MCQ190) %>%
+  summarise(n=sum(WTSAF2YR))
+
+#df$crp_class <- ordered(df$crp_class, levels=c("Low CRP", "Med CRP", "High CRP"))
+df$bmi_class <- ordered(df$bmi_class, levels=c("Low", "High"))
+#df$depr_class[df$depr_class %in% c(NA)] <- "Low"
+#df$depr_class <- ordered(df$depr_class, levels=c("Low", "High"))
+df$tri_class <- ordered(df$tri_class, levels=c('Low', 'High'))
+df$MCQ190[df$MCQ190 %in% c(NA)] <- "No Arthritis"
+df$MCQ190 <- factor(df$MCQ190)
+
+
+df$Observed = round(df$n/sum(df$n)*4136)
+
+df %<>% select(-n) %>% drop_na(tri_class, bmi_class) %>% arrange(desc(bmi_class), desc(tri_class))
+
+
+### Multi Dimensional Chisq Analysis for Comorbidities
+w_sum <- sum(df$Observed)
+
+ev <- c()
+for (i in 1:8) {ev[i] <- sum(df$Observed[df$bmi_class==df$bmi_class[i]])*
+  sum(df$Observed[df$tri_class==df$tri_class[i]])*
+  sum(df$Observed[df$MCQ190 == df$MCQ190[i]])/
+  w_sum^2}
+df$Expected <- ev
+df$Chisq <- (df$Expected - df$Observed)^2/df$Expected
+paste("Chisq Statistic: ", sum(df$Chisq))
+degfree = 4
+paste("Degrees of Freedom: ", degfree)
+
+paste("p-value: ", pchisq(sum(df$Chisq), df=degfree, lower.tail=FALSE))
+
+df$Chisq <- round(df$Chisq,2)
+
+df %<>% mutate(Std.Residuals=(Observed-Expected)/sqrt(Expected))
+
+names(df) <- c("BMI", "Triglyceride", "RA", "Observed", "Expected", "Chisq", "Std.Residuals")
+levels(df$RA) <- c("No", "Yes")
+df <- df[, -6]
+```
+
+### BMI <> DEPR <> RA
+
+```{r}
+df <- data %>% mutate(crp = LBXCRP * 10) %>%
+  mutate(crp_class = ifelse(crp < 1, "Low CRP", ifelse(crp < 3, "Med CRP", "High CRP"))) %>%
+  mutate(depr_class = ifelse(depr_severity < 10, NA, 'High')) %>%
+  mutate(tri_class = ifelse(LBXTR < 150, "Low", "High")) %>%
+  mutate(bmi_class = ifelse(BMXBMI < 30, "Low", "High")) %>%
+  select(bmi_class, depr_class, MCQ190, WTSAF2YR) %>%
+  group_by(bmi_class, depr_class, MCQ190) %>%
+  summarise(n=sum(WTSAF2YR))
+
+#df$crp_class <- ordered(df$crp_class, levels=c("Low CRP", "Med CRP", "High CRP"))
+df$bmi_class <- ordered(df$bmi_class, levels=c("Low", "High"))
+df$depr_class[df$depr_class %in% c(NA)] <- "Low"
+df$depr_class <- ordered(df$depr_class, levels=c("Low", "High"))
+#df$tri_class <- ordered(df$tri_class, levels=c('Low', 'High'))
+df$MCQ190[df$MCQ190 %in% c(NA)] <- "No Arthritis"
+df$MCQ190 <- factor(df$MCQ190)
+
+
+df$Observed = round(df$n/sum(df$n)*4136)
+
+df %<>% select(-n) %>% drop_na(bmi_class) %>% arrange(desc(bmi_class), desc(depr_class))
+
+
+### Multi Dimensional Chisq Analysis for Comorbidities
+w_sum <- sum(df$Observed)
+
+ev <- c()
+for (i in 1:8) {ev[i] <- sum(df$Observed[df$bmi_class==df$bmi_class[i]])*
+  sum(df$Observed[df$depr_class==df$depr_class[i]])*
+  sum(df$Observed[df$MCQ190 == df$MCQ190[i]])/
+  w_sum^2}
+df$Expected <- ev
+df$Chisq <- (df$Expected - df$Observed)^2/df$Expected
+paste("Chisq Statistic: ", sum(df$Chisq))
+degfree = 2*2*2-2-2-2+2
+paste("Degrees of Freedom: ", degfree)
+
+paste("p-value: ", pchisq(sum(df$Chisq), df=degfree, lower.tail=FALSE))
+
+df$Chisq <- round(df$Chisq,2)
+
+df %<>% mutate(Std.Residuals=(Observed-Expected)/sqrt(Expected))
+
+names(df) <- c("BMI", "Depression", "RA", "Observed", "Expected", "Chisq", "Std.Residuals")
+levels(df$RA) <- c("No", "Yes")
+df <- df[, -6]
+```
+
+
+
+```{r}
+ABD <- df %>% select(RA, BMI, Depression, Observed)
+n <- ABD %>% summarize(sum=sum(Observed))
+A1 <- ABD %>% filter(RA == 'Yes') %>% summarise(sum = sum(Observed))
+
+A2 <- ABD %>% filter(RA == 'No') %>% summarise(sum = sum(Observed))
+B1 <- ABD %>% filter(BMI == 'High') %>% summarise(sum = sum(Observed))
+B2 <- ABD %>% filter(BMI == 'Low') %>% summarise(sum = sum(Observed))
+D1 <- ABD %>% filter(Depression == 'High') %>% summarise(sum = sum(Observed))
+D2 <- ABD %>% filter(Depression == 'Low') %>% summarise(sum = sum(Observed))
+
+n <- n$sum
+A1 <- A1$sum
+A2 <- A2$sum
+B1 <- B1$sum
+B2 <- B2$sum
+D1 <- D1$sum
+D2 <- D2$sum
+
+m111 <- (A1*B1*D1)/n^2
+m211 <- (A2*B1*D1)/n^2
+m121 <- (A1*B2*D1)/n^2
+m112 <- (A1*B1*D2)/n^2
+m212 <- (A2*B1*D2)/n^2
+m221 <- (A2*B2*D1)/n^2
+m122 <- (A1*B2*D2)/n^2
+m222 <- (A2*B2*D2)/n^2
+
+m <- c(m111,m211,m121,m112,m212,m221,m122,m222)
+
+y111 <- ABD %>% filter(RA == 'Yes', BMI == 'High', Depression == 'High') %>% summarise (sum = sum(Observed))
+y211 <- ABD %>% filter(RA == 'No', BMI == 'High', Depression == 'High') %>% summarise (sum = sum(Observed))
+y121 <- ABD %>% filter(RA == 'Yes', BMI == 'Low', Depression == 'High') %>% summarise (sum = sum(Observed))
+y112 <- ABD %>% filter(RA == 'Yes', BMI == 'High', Depression == 'Low') %>% summarise (sum = sum(Observed))
+y212 <- ABD %>% filter(RA == 'No', BMI == 'High', Depression == 'Low') %>% summarise (sum = sum(Observed))
+y221 <- ABD %>% filter(RA == 'No', BMI == 'Low', Depression == 'High') %>% summarise (sum = sum(Observed))
+y122 <- ABD %>% filter(RA == 'Yes', BMI == 'Low', Depression == 'Low') %>% summarise (sum = sum(Observed))
+y222 <- ABD %>% filter(RA == 'No', BMI == 'Low', Depression == 'Low') %>% summarise (sum = sum(Observed))
+
+y111 <- y111$sum
+y211 <- y211$sum
+y121 <- y121$sum
+y112 <- y112$sum
+y212 <- y212$sum
+y221 <- y221$sum
+y122 <- y122$sum
+y222 <- y222$sum
+
+y <- c(y111,y211,y121,y112,y212,y221,y122,y222)
+
+
+chisq <- 0
+c <- c()
+for(i in 1:8){
+  c[i] = (y[i] - m[i])^2 / m[i]
+  chisq = chisq + c[i]
+}
+v <- 2*2*2 -2 -2 -2 +2
+pchisq(chisq,v,lower.tail = FALSE)
+```
+
+
+
+
+### LOW CRP
+#### BMI <> DEPR <> RA
+```{r}
+df <- data %>% mutate(crp = LBXCRP * 10) %>%
+  mutate(crp_class = ifelse(crp < 1, "Low CRP", ifelse(crp < 3, "Med CRP", "High CRP"))) %>%
+  mutate(depr_class = ifelse(depr_severity < 10, NA, 'High')) %>%
+  mutate(tri_class = ifelse(LBXTR < 150, "Low", "High")) %>%
+  mutate(bmi_class = ifelse(BMXBMI < 30, "Low", "High")) %>%
+  filter(crp_class=='Low CRP') %>%
+  select(bmi_class, depr_class, MCQ190, WTSAF2YR) %>%
+  group_by(bmi_class, depr_class, MCQ190) %>%
+  summarise(n=sum(WTSAF2YR))
+
+#df$crp_class <- ordered(df$crp_class, levels=c("Low CRP", "Med CRP", "High CRP"))
+df$bmi_class <- ordered(df$bmi_class, levels=c("Low", "High"))
+df$depr_class[df$depr_class %in% c(NA)] <- "Low"
+df$depr_class <- ordered(df$depr_class, levels=c("Low", "High"))
+#df$tri_class <- ordered(df$tri_class, levels=c('Low', 'High'))
+df$MCQ190[df$MCQ190 %in% c(NA)] <- "No Arthritis"
+df$MCQ190 <- factor(df$MCQ190)
+
+
+df$Observed = round(df$n/sum(df$n)*1269)
+
+df %<>% select(-n) %>% drop_na(bmi_class) %>% arrange(desc(bmi_class), desc(depr_class))
+
+
+### Multi Dimensional Chisq Analysis for Comorbidities
+w_sum <- sum(df$Observed)
+
+ev <- c()
+for (i in 1:8) {ev[i] <- sum(df$Observed[df$bmi_class==df$bmi_class[i]])*
+  sum(df$Observed[df$depr_class==df$depr_class[i]])*
+  sum(df$Observed[df$MCQ190 == df$MCQ190[i]])/
+  w_sum^2}
+df$Expected <- ev
+df$Chisq <- (df$Expected - df$Observed)^2/df$Expected
+paste("Chisq Statistic: ", sum(df$Chisq))
+degfree = 4
+paste("Degrees of Freedom: ", degfree)
+
+paste("p-value: ", pchisq(sum(df$Chisq), df=degfree, lower.tail=FALSE))
+
+df$Chisq <- round(df$Chisq,2)
+
+df %<>% mutate(Std.Residuals=(Observed-Expected)/sqrt(Expected))
+
+names(df) <- c("BMI", "Depression", "RA", "Observed", "Expected", "Chisq", "Std.Residuals")
+levels(df$RA) <- c("No", "Yes")
+df <- df[, -6]
+```
+
+#### TRI <> DEPR <> RA
+```{r}
+df <- data %>% mutate(crp = LBXCRP * 10) %>%
+  mutate(crp_class = ifelse(crp < 1, "Low CRP", ifelse(crp < 3, "Med CRP", "High CRP"))) %>%
+  mutate(depr_class = ifelse(depr_severity < 10, NA, 'High')) %>%
+  mutate(tri_class = ifelse(LBXTR < 150, "Low", "High")) %>%
+  mutate(bmi_class = ifelse(BMXBMI < 30, "Low", "High")) %>%
+  filter(crp_class=='Low CRP') %>%
+  select(tri_class, depr_class, MCQ190, WTSAF2YR) %>%
+  group_by(tri_class, depr_class, MCQ190) %>%
+  summarise(n=sum(WTSAF2YR))
+
+#df$crp_class <- ordered(df$crp_class, levels=c("Low CRP", "Med CRP", "High CRP"))
+#df$bmi_class <- ordered(df$bmi_class, levels=c("Low", "High"))
+df$depr_class[df$depr_class %in% c(NA)] <- "Low"
+df$depr_class <- ordered(df$depr_class, levels=c("Low", "High"))
+df$tri_class <- ordered(df$tri_class, levels=c('Low', 'High'))
+df$MCQ190[df$MCQ190 %in% c(NA)] <- "No Arthritis"
+df$MCQ190 <- factor(df$MCQ190)
+
+
+df$Observed = round(df$n/sum(df$n)*1269)
+
+df %<>% select(-n) %>% drop_na(tri_class) %>% arrange(desc(tri_class), desc(depr_class))
+
+
+### Multi Dimensional Chisq Analysis for Comorbidities
+w_sum <- sum(df$Observed)
+
+ev <- c()
+for (i in 1:8) {ev[i] <- sum(df$Observed[df$tri_class==df$tri_class[i]])*
+  sum(df$Observed[df$depr_class==df$depr_class[i]])*
+  sum(df$Observed[df$MCQ190 == df$MCQ190[i]])/
+  w_sum^2}
+df$Expected <- ev
+df$Chisq <- (df$Expected - df$Observed)^2/df$Expected
+paste("Chisq Statistic: ", sum(df$Chisq))
+degfree = 4
+paste("Degrees of Freedom: ", degfree)
+
+paste("p-value: ", pchisq(sum(df$Chisq), df=degfree, lower.tail=FALSE))
+
+df$Chisq <- round(df$Chisq,2)
+
+df %<>% mutate(Std.Residuals=(Observed-Expected)/sqrt(Expected))
+
+names(df) <- c("Triglyceride", "Depression", "RA", "Observed", "Expected", "Chisq", "Std.Residuals")
+levels(df$RA) <- c("No", "Yes")
+df <- df[, -6]
+```
+
+#### BMI <> TRI <> RA
+```{r}
+df <- data %>% mutate(crp = LBXCRP * 10) %>%
+  mutate(crp_class = ifelse(crp < 1, "Low CRP", ifelse(crp < 3, "Med CRP", "High CRP"))) %>%
+  mutate(depr_class = ifelse(depr_severity < 10, NA, 'High')) %>%
+  mutate(tri_class = ifelse(LBXTR < 150, "Low", "High")) %>%
+  mutate(bmi_class = ifelse(BMXBMI < 30, "Low", "High")) %>%
+  filter(crp_class=='Low CRP') %>%
+  select(tri_class, bmi_class, MCQ190, WTSAF2YR) %>%
+  group_by(tri_class, bmi_class, MCQ190) %>%
+  summarise(n=sum(WTSAF2YR))
+
+#df$crp_class <- ordered(df$crp_class, levels=c("Low CRP", "Med CRP", "High CRP"))
+df$bmi_class <- ordered(df$bmi_class, levels=c("Low", "High"))
+#df$depr_class[df$depr_class %in% c(NA)] <- "Low"
+#df$depr_class <- ordered(df$depr_class, levels=c("Low", "High"))
+df$tri_class <- ordered(df$tri_class, levels=c('Low', 'High'))
+df$MCQ190[df$MCQ190 %in% c(NA)] <- "No Arthritis"
+df$MCQ190 <- factor(df$MCQ190)
+
+
+df$Observed = round(df$n/sum(df$n)*1269)
+
+df %<>% select(-n) %>% drop_na(tri_class, bmi_class) %>% arrange(desc(tri_class), desc(bmi_class))
+
+
+### Multi Dimensional Chisq Analysis for Comorbidities
+w_sum <- sum(df$Observed)
+
+ev <- c()
+for (i in 1:8) {ev[i] <- sum(df$Observed[df$tri_class==df$tri_class[i]])*
+  sum(df$Observed[df$bmi_class==df$bmi_class[i]])*
+  sum(df$Observed[df$MCQ190 == df$MCQ190[i]])/
+  w_sum^2}
+df$Expected <- ev
+df$Chisq <- (df$Expected - df$Observed)^2/df$Expected
+paste("Chisq Statistic: ", sum(df$Chisq))
+degfree = 4
+paste("Degrees of Freedom: ", degfree)
+
+paste("p-value: ", pchisq(sum(df$Chisq), df=degfree, lower.tail=FALSE))
+
+df$Chisq <- round(df$Chisq,2)
+
+df %<>% mutate(Std.Residuals=(Observed-Expected)/sqrt(Expected))
+
+names(df) <- c("Triglyceride", "BMI", "RA", "Observed", "Expected", "Chisq", "Std.Residuals")
+levels(df$RA) <- c("No", "Yes")
+df <- df[, -6]
+```
+
+### MED CRP
+#### BMI <> DEPR <> RA
+```{r}
+df <- data %>% mutate(crp = LBXCRP * 10) %>%
+  mutate(crp_class = ifelse(crp < 1, "Low CRP", ifelse(crp < 3, "Med CRP", "High CRP"))) %>%
+  mutate(depr_class = ifelse(depr_severity < 10, NA, 'High')) %>%
+  mutate(tri_class = ifelse(LBXTR < 150, "Low", "High")) %>%
+  mutate(bmi_class = ifelse(BMXBMI < 30, "Low", "High")) %>%
+  filter(crp_class=='Med CRP') %>%
+  select(bmi_class, depr_class, MCQ190, WTSAF2YR) %>%
+  group_by(bmi_class, depr_class, MCQ190) %>%
+  summarise(n=sum(WTSAF2YR))
+
+
+
+#df$crp_class <- ordered(df$crp_class, levels=c("Low CRP", "Med CRP", "High CRP"))
+df$bmi_class <- ordered(df$bmi_class, levels=c("Low", "High"))
+df$depr_class[df$depr_class %in% c(NA)] <- "Low"
+df$depr_class <- ordered(df$depr_class, levels=c("Low", "High"))
+#df$tri_class <- ordered(df$tri_class, levels=c('Low', 'High'))
+df$MCQ190[df$MCQ190 %in% c(NA)] <- "No Arthritis"
+df$MCQ190 <- factor(df$MCQ190)
+
+
+df$Observed = round(df$n/sum(df$n)*1281)
+
+df %<>% select(-n) %>% drop_na(bmi_class) %>% arrange(desc(bmi_class), desc(depr_class))
+
+
+### Multi Dimensional Chisq Analysis for Comorbidities
+w_sum <- sum(df$Observed)
+
+ev <- c()
+for (i in 1:8) {ev[i] <- sum(df$Observed[df$bmi_class==df$bmi_class[i]])*
+  sum(df$Observed[df$depr_class==df$depr_class[i]])*
+  sum(df$Observed[df$MCQ190 == df$MCQ190[i]])/
+  w_sum^2}
+df$Expected <- ev
+df$Chisq <- (df$Expected - df$Observed)^2/df$Expected
+paste("Chisq Statistic: ", sum(df$Chisq))
+degfree = 4
+paste("Degrees of Freedom: ", degfree)
+
+paste("p-value: ", pchisq(sum(df$Chisq), df=degfree, lower.tail=FALSE))
+
+df$Chisq <- round(df$Chisq,2)
+
+df %<>% mutate(Std.Residuals=(Observed-Expected)/sqrt(Expected))
+
+names(df) <- c("BMI", "Depression", "RA", "Observed", "Expected", "Chisq", "Std.Residuals")
+levels(df$RA) <- c("No", "Yes")
+df <- df[, -6]
+```
+
+#### TRI <> DEPR <> RA
+```{r}
+df <- data %>% mutate(crp = LBXCRP * 10) %>%
+  mutate(crp_class = ifelse(crp < 1, "Low CRP", ifelse(crp < 3, "Med CRP", "High CRP"))) %>%
+  mutate(depr_class = ifelse(depr_severity < 10, NA, 'High')) %>%
+  mutate(tri_class = ifelse(LBXTR < 150, "Low", "High")) %>%
+  mutate(bmi_class = ifelse(BMXBMI < 30, "Low", "High")) %>%
+  filter(crp_class=='Med CRP') %>%
+  select(tri_class, depr_class, MCQ190, WTSAF2YR) %>%
+  group_by(tri_class, depr_class, MCQ190) %>%
+  summarise(n=sum(WTSAF2YR))
+
+#df$crp_class <- ordered(df$crp_class, levels=c("Low CRP", "Med CRP", "High CRP"))
+#df$bmi_class <- ordered(df$bmi_class, levels=c("Low", "High"))
+df$depr_class[df$depr_class %in% c(NA)] <- "Low"
+df$depr_class <- ordered(df$depr_class, levels=c("Low", "High"))
+df$tri_class <- ordered(df$tri_class, levels=c('Low', 'High'))
+df$MCQ190[df$MCQ190 %in% c(NA)] <- "No Arthritis"
+df$MCQ190 <- factor(df$MCQ190)
+
+
+df$Observed = round(df$n/sum(df$n)*1281)
+
+df %<>% select(-n) %>% drop_na(tri_class) %>% arrange(desc(tri_class), desc(depr_class))
+
+
+### Multi Dimensional Chisq Analysis for Comorbidities
+w_sum <- sum(df$Observed)
+
+ev <- c()
+for (i in 1:8) {ev[i] <- sum(df$Observed[df$tri_class==df$tri_class[i]])*
+  sum(df$Observed[df$depr_class==df$depr_class[i]])*
+  sum(df$Observed[df$MCQ190 == df$MCQ190[i]])/
+  w_sum^2}
+df$Expected <- ev
+df$Chisq <- (df$Expected - df$Observed)^2/df$Expected
+paste("Chisq Statistic: ", sum(df$Chisq))
+degfree = 4
+paste("Degrees of Freedom: ", degfree)
+
+paste("p-value: ", pchisq(sum(df$Chisq), df=degfree, lower.tail=FALSE))
+
+df$Chisq <- round(df$Chisq,2)
+
+df %<>% mutate(Std.Residuals=(Observed-Expected)/sqrt(Expected))
+
+names(df) <- c("Triglyceride", "Depression", "RA", "Observed", "Expected", "Chisq", "Std.Residuals")
+levels(df$RA) <- c("No", "Yes")
+df <- df[, -6]
+```
+
+#### BMI <> TRI <> RA
+```{r}
+df <- data %>% mutate(crp = LBXCRP * 10) %>%
+  mutate(crp_class = ifelse(crp < 1, "Low CRP", ifelse(crp < 3, "Med CRP", "High CRP"))) %>%
+  mutate(depr_class = ifelse(depr_severity < 10, NA, 'High')) %>%
+  mutate(tri_class = ifelse(LBXTR < 150, "Low", "High")) %>%
+  mutate(bmi_class = ifelse(BMXBMI < 30, "Low", "High")) %>%
+  filter(crp_class=='Med CRP') %>%
+  select(tri_class, bmi_class, MCQ190, WTSAF2YR) %>%
+  group_by(tri_class, bmi_class, MCQ190) %>%
+  summarise(n=sum(WTSAF2YR))
+
+#df$crp_class <- ordered(df$crp_class, levels=c("Low CRP", "Med CRP", "High CRP"))
+df$bmi_class <- ordered(df$bmi_class, levels=c("Low", "High"))
+#df$depr_class[df$depr_class %in% c(NA)] <- "Low"
+#df$depr_class <- ordered(df$depr_class, levels=c("Low", "High"))
+df$tri_class <- ordered(df$tri_class, levels=c('Low', 'High'))
+df$MCQ190[df$MCQ190 %in% c(NA)] <- "No Arthritis"
+df$MCQ190 <- factor(df$MCQ190)
+
+
+df$Observed = round(df$n/sum(df$n)*1281)
+
+df %<>% select(-n) %>% drop_na(tri_class, bmi_class) %>% arrange(desc(tri_class), desc(bmi_class))
+
+
+### Multi Dimensional Chisq Analysis for Comorbidities
+w_sum <- sum(df$Observed)
+
+ev <- c()
+for (i in 1:8) {ev[i] <- sum(df$Observed[df$tri_class==df$tri_class[i]])*
+  sum(df$Observed[df$bmi_class==df$bmi_class[i]])*
+  sum(df$Observed[df$MCQ190 == df$MCQ190[i]])/
+  w_sum^2}
+df$Expected <- ev
+df$Chisq <- (df$Expected - df$Observed)^2/df$Expected
+paste("Chisq Statistic: ", sum(df$Chisq))
+degfree = 4
+paste("Degrees of Freedom: ", degfree)
+
+paste("p-value: ", pchisq(sum(df$Chisq), df=degfree, lower.tail=FALSE))
+
+df$Chisq <- round(df$Chisq,2)
+
+df %<>% mutate(Std.Residuals=(Observed-Expected)/sqrt(Expected))
+
+names(df) <- c("Triglyceride", "BMI", "RA", "Observed", "Expected", "Chisq", "Std.Residuals")
+levels(df$RA) <- c("No", "Yes")
+df <- df[, -6]
+```
+
+### HIGH CRP
+#### BMI <> DEPR <> RA
+```{r}
+df <- data %>% mutate(crp = LBXCRP * 10) %>%
+  mutate(crp_class = ifelse(crp < 1, "Low CRP", ifelse(crp < 3, "Med CRP", "High CRP"))) %>%
+  mutate(depr_class = ifelse(depr_severity < 10, NA, 'High')) %>%
+  mutate(tri_class = ifelse(LBXTR < 150, "Low", "High")) %>%
+  mutate(bmi_class = ifelse(BMXBMI < 30, "Low", "High")) %>%
+  filter(crp_class=='High CRP') %>%
+  select(bmi_class, depr_class, MCQ190, WTSAF2YR) %>%
+  group_by(bmi_class, depr_class, MCQ190) %>%
+  summarise(n=sum(WTSAF2YR))
+
+#df$crp_class <- ordered(df$crp_class, levels=c("Low CRP", "Med CRP", "High CRP"))
+df$bmi_class <- ordered(df$bmi_class, levels=c("Low", "High"))
+df$depr_class[df$depr_class %in% c(NA)] <- "Low"
+df$depr_class <- ordered(df$depr_class, levels=c("Low", "High"))
+#df$tri_class <- ordered(df$tri_class, levels=c('Low', 'High'))
+df$MCQ190[df$MCQ190 %in% c(NA)] <- "No Arthritis"
+df$MCQ190 <- factor(df$MCQ190)
+
+
+df$Observed = round(df$n/sum(df$n)*1382)
+
+df %<>% select(-n) %>% drop_na(bmi_class) %>% arrange(desc(bmi_class), desc(depr_class))
+
+
+### Multi Dimensional Chisq Analysis for Comorbidities
+w_sum <- sum(df$Observed)
+
+ev <- c()
+for (i in 1:8) {ev[i] <- sum(df$Observed[df$bmi_class==df$bmi_class[i]])*
+  sum(df$Observed[df$depr_class==df$depr_class[i]])*
+  sum(df$Observed[df$MCQ190 == df$MCQ190[i]])/
+  w_sum^2}
+df$Expected <- ev
+df$Chisq <- (df$Expected - df$Observed)^2/df$Expected
+paste("Chisq Statistic: ", sum(df$Chisq))
+degfree = 4
+paste("Degrees of Freedom: ", degfree)
+
+paste("p-value: ", pchisq(sum(df$Chisq), df=degfree, lower.tail=FALSE))
+
+df$Chisq <- round(df$Chisq,2)
+
+df %<>% mutate(Std.Residuals=(Observed-Expected)/sqrt(Expected))
+
+names(df) <- c("BMI", "Depression", "RA", "Observed", "Expected", "Chisq", "Std.Residuals")
+levels(df$RA) <- c("No", "Yes")
+df <- df[, -6]
+```
+
+#### TRI <> DEPR <> RA
+```{r}
+df <- data %>% mutate(crp = LBXCRP * 10) %>%
+  mutate(crp_class = ifelse(crp < 1, "Low CRP", ifelse(crp < 3, "Med CRP", "High CRP"))) %>%
+  mutate(depr_class = ifelse(depr_severity < 10, NA, 'High')) %>%
+  mutate(tri_class = ifelse(LBXTR < 150, "Low", "High")) %>%
+  mutate(bmi_class = ifelse(BMXBMI < 30, "Low", "High")) %>%
+  filter(crp_class=='High CRP') %>%
+  select(tri_class, depr_class, MCQ190, WTSAF2YR) %>%
+  group_by(tri_class, depr_class, MCQ190) %>%
+  summarise(n=sum(WTSAF2YR))
+
+#df$crp_class <- ordered(df$crp_class, levels=c("Low CRP", "Med CRP", "High CRP"))
+#df$bmi_class <- ordered(df$bmi_class, levels=c("Low", "High"))
+df$depr_class[df$depr_class %in% c(NA)] <- "Low"
+df$depr_class <- ordered(df$depr_class, levels=c("Low", "High"))
+df$tri_class <- ordered(df$tri_class, levels=c('Low', 'High'))
+df$MCQ190[df$MCQ190 %in% c(NA)] <- "No Arthritis"
+df$MCQ190 <- factor(df$MCQ190)
+
+
+df$Observed = round(df$n/sum(df$n)*1382)
+
+df %<>% select(-n) %>% drop_na(tri_class) %>% arrange(desc(tri_class), desc(depr_class))
+
+
+### Multi Dimensional Chisq Analysis for Comorbidities
+w_sum <- sum(df$Observed)
+
+ev <- c()
+for (i in 1:8) {ev[i] <- sum(df$Observed[df$tri_class==df$tri_class[i]])*
+  sum(df$Observed[df$depr_class==df$depr_class[i]])*
+  sum(df$Observed[df$MCQ190 == df$MCQ190[i]])/
+  w_sum^2}
+df$Expected <- ev
+df$Chisq <- (df$Expected - df$Observed)^2/df$Expected
+paste("Chisq Statistic: ", sum(df$Chisq))
+degfree = 4
+paste("Degrees of Freedom: ", degfree)
+
+paste("p-value: ", pchisq(sum(df$Chisq), df=degfree, lower.tail=FALSE))
+
+df$Chisq <- round(df$Chisq,2)
+
+df %<>% mutate(Std.Residuals=(Observed-Expected)/sqrt(Expected))
+
+names(df) <- c("Triglyceride", "Depression", "RA", "Observed", "Expected", "Chisq", "Std.Residuals")
+levels(df$RA) <- c("No", "Yes")
+df <- df[, -6]
+```
+
+#### BMI <> TRI <> RA
+```{r}
+df <- data %>% mutate(crp = LBXCRP * 10) %>%
+  mutate(crp_class = ifelse(crp < 1, "Low CRP", ifelse(crp < 3, "Med CRP", "High CRP"))) %>%
+  mutate(depr_class = ifelse(depr_severity < 10, NA, 'High')) %>%
+  mutate(tri_class = ifelse(LBXTR < 150, "Low", "High")) %>%
+  mutate(bmi_class = ifelse(BMXBMI < 30, "Low", "High")) %>%
+  filter(crp_class=='High CRP') %>%
+  select(tri_class, bmi_class, MCQ190, WTSAF2YR) %>%
+  group_by(tri_class, bmi_class, MCQ190) %>%
+  summarise(n=sum(WTSAF2YR))
+
+#df$crp_class <- ordered(df$crp_class, levels=c("Low CRP", "Med CRP", "High CRP"))
+df$bmi_class <- ordered(df$bmi_class, levels=c("Low", "High"))
+#df$depr_class[df$depr_class %in% c(NA)] <- "Low"
+#df$depr_class <- ordered(df$depr_class, levels=c("Low", "High"))
+df$tri_class <- ordered(df$tri_class, levels=c('Low', 'High'))
+df$MCQ190[df$MCQ190 %in% c(NA)] <- "No Arthritis"
+df$MCQ190 <- factor(df$MCQ190)
+
+
+df$Observed = round(df$n/sum(df$n)*1382)
+
+df %<>% select(-n) %>% drop_na(tri_class, bmi_class) %>% arrange(desc(tri_class), desc(bmi_class))
+
+
+### Multi Dimensional Chisq Analysis for Comorbidities
+w_sum <- sum(df$Observed)
+
+ev <- c()
+for (i in 1:8) {ev[i] <- sum(df$Observed[df$tri_class==df$tri_class[i]])*
+  sum(df$Observed[df$bmi_class==df$bmi_class[i]])*
+  sum(df$Observed[df$MCQ190 == df$MCQ190[i]])/
+  w_sum^2}
+df$Expected <- ev
+df$Chisq <- (df$Expected - df$Observed)^2/df$Expected
+paste("Chisq Statistic: ", sum(df$Chisq))
+degfree = 4
+paste("Degrees of Freedom: ", degfree)
+
+paste("p-value: ", pchisq(sum(df$Chisq), df=degfree, lower.tail=FALSE))
+
+df$Chisq <- round(df$Chisq,2)
+
+df %<>% mutate(Std.Residuals=(Observed-Expected)/sqrt(Expected))
+
+names(df) <- c("Triglyceride", "BMI", "RA", "Observed", "Expected", "Chisq", "Std.Residuals")
+levels(df$RA) <- c("No", "Yes")
+df <- df[, -6]
+```
