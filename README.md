@@ -18,6 +18,7 @@ Some of the plots produced by the Paper_Visualizations.Rmd file, in this case th
 A cleaned csv file containing medical conditions, depression, demographic, and CRP data.
 
 ### NHANES RA Analysis / Paper_Visualizations.Rmd
-
+An R markdown file that produces all plots found in the manuscript. The "Cumulative distributions" sections produces the cumulative distribution plots comparing Triglyceride, CRP, Depression, and BMI in the RA vs the non-RA samples. The "Summary Table" section computes the summaries reported in the demographics table for weighted and unweighted measures of the RA and non-RA samples. The "CRP Vis" section computes the visualization of different variables across levels of CRP. The "Tile Plot" section creates the tile plots (Figure 5 and Figure 6) in the manuscript. The "Chi Sq" section contains all Chi Squared calculations done for this manuscript.  
 
 ### NHANES RA Analysis / data_extraction_and_preparation.R
+An R script that takes as inputs the raw NHANES data files and returns cleaned csv files. The 2007-2008 and 2009-2010 csv files are those utilized in this work and can be found in the Cleaned Data subfolder. 
