@@ -1,7 +1,7 @@
 # README
 This repository contains the code and data for the manuscript titled "A stronger association of depression with rheumatoid arthritis in presence of high BMI or hypertriglyceridemia."
 
-# NHANES RA Analysis
+## NHANES RA Analysis
 Master folder containing all code and data.
 
 ## NHANES RA Analysis / Raw Data
