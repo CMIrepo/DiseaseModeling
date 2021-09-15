@@ -12,7 +12,7 @@ This subfolder contains folders for the raw NHANES data for the years 2007-2008 
 This subfolder contains csv files of the cleaned NHANES data for the years 2007-2008 and 2009-2010 as well as the joined dataset for years 2007-2010. The data in this folder was produced directly with data_extraction_and_preparation.R. 
 
 ### NHANES RA Analysis / Plots
-Some of the plots produced by the Paper_Visualizations.Rmd file, in this case those that represent sections of Figures 5 and 6 in the manuscript.
+The tile plots produced by the Paper_Visualizations.Rmd file, in this case those that represent sections of Figures 5 and 6 in the manuscript.
 
 ### NHANES RA Analysis / MC_DEPR_DEM_CRP.csv
 A cleaned csv file containing medical conditions, depression, demographic, and CRP data.
